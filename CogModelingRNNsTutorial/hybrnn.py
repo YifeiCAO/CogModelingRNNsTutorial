@@ -36,6 +36,14 @@ class BiRNN(hk.RNNCore):
       )
     else:
       self.forget = rl_params['forget']
+    
+    if self.fit_switch:
+      init = hk.initializers.RandomNormal(stddev=1, mean=0)
+      self.switch_prob = jax.nn.sigmoid(  # 0 < switch_prob < 1
+          hk.get_parameter('unsigmoid_switch', (1,), init=init)
+      )
+    else:
+      self.switch_prob = rl_params['switch_prob']
 
   def _value_rnn(self, state, value, action, reward):
 
@@ -52,12 +60,15 @@ class BiRNN(hk.RNNCore):
 
     update = hk.Linear(1)(next_state)
     value = (1 - self.forget) * value + self.forget * self.init_value
+    
     next_value = value + action * update
-
+    
     if self.fit_switch:
-      next_value = jnp.flip(next_value, axis=1)  # Switch values between actions
-
+      switch_mask = jax.random.bernoulli(hk.next_rng_key(), self.switch_prob, value.shape)
+      next_value = jnp.where(switch_mask, jnp.flip(next_value, axis=1), next_value)
+        
     return next_value, next_state
+
 
   def _habit_rnn(self, state, habit, action):
 
