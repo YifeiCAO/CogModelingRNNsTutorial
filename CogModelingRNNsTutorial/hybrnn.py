@@ -9,7 +9,7 @@ RNNState = jnp.array
 
 
 class BiRNN(hk.RNNCore):
-  """A hybrid RNN: "habit" processes action choices; "value" processes rewards."""
+  """A hybrid RNN: 'habit' processes action choices; 'value' processes rewards."""
 
   def __init__(self, rl_params, network_params, init_value=0.5):
 
@@ -26,6 +26,8 @@ class BiRNN(hk.RNNCore):
 
     self._n_actions = network_params['n_actions']
     self._hidden_size = network_params['hidden_size']
+
+    self.fit_switch = rl_params['fit_switch']  # Add fit_switch parameter
 
     if rl_params['fit_forget']:
       init = hk.initializers.RandomNormal(stddev=1, mean=0)
@@ -52,6 +54,9 @@ class BiRNN(hk.RNNCore):
     value = (1 - self.forget) * value + self.forget * self.init_value
     next_value = value + action * update
 
+    if self.fit_switch:
+      next_value = jnp.flip(next_value, axis=1)  # Switch values between actions
+
     return next_value, next_state
 
   def _habit_rnn(self, state, habit, action):
@@ -71,7 +76,7 @@ class BiRNN(hk.RNNCore):
     h_state, v_state, habit, value = prev_state
     action = inputs[:, 0]  # shape: (batch_size, )
     reward = inputs[:, -1]  # shape: (batch_size,)
-    action_onehot = jax.nn.one_hot(action,2)
+    action_onehot = jax.nn.one_hot(action, 2)
     
     # Value module: update/create new values
     next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
@@ -91,4 +96,5 @@ class BiRNN(hk.RNNCore):
         0 * jnp.ones([batch_size, self._hidden_size]),  # v_state
         0 * jnp.ones([batch_size, self._n_actions]),  # habit
         self.init_value * jnp.ones([batch_size, self._n_actions]),  # value
-        )
+    )
+
