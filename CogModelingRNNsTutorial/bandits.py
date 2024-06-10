@@ -699,7 +699,7 @@ class Hk_ForgetAgentQ(hk.RNNCore):
     beta = hk.get_parameter(
         'beta', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=2)
     )
-    perseverance = hk.get_parameter(
+    forget = hk.get_parameter(
         'forget', (1,), init=hk.initializers.RandomUniform(minval=-1, maxval=1)
     )
 
