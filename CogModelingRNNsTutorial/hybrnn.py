@@ -27,8 +27,6 @@ class BiRNN(hk.RNNCore):
     self._n_actions = network_params['n_actions']
     self._hidden_size = network_params['hidden_size']
 
-    self.fit_switch = rl_params['fit_switch']  # Add fit_switch parameter
-
     if rl_params['fit_forget']:
       init = hk.initializers.RandomNormal(stddev=1, mean=0)
       self.forget = jax.nn.sigmoid(  # 0 < forget < 1
@@ -37,14 +35,6 @@ class BiRNN(hk.RNNCore):
     else:
       self.forget = rl_params['forget']
     
-    if self.fit_switch:
-      init = hk.initializers.RandomNormal(stddev=1, mean=0)
-      self.switch_prob = jax.nn.sigmoid(  # 0 < switch_prob < 1
-          hk.get_parameter('unsigmoid_switch', (1,), init=init)
-      )
-    else:
-      self.switch_prob = rl_params['switch_prob']
-
   def _value_rnn(self, state, value, action, reward):
 
     pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
@@ -63,9 +53,6 @@ class BiRNN(hk.RNNCore):
     
     next_value = value + action * update
     
-    if self.fit_switch:
-      switch_mask = jax.random.bernoulli(hk.next_rng_key(), self.switch_prob, value.shape)
-      next_value = jnp.where(switch_mask, jnp.flip(next_value, axis=1), next_value)
         
     return next_value, next_state
 
