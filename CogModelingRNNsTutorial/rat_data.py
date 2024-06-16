@@ -85,7 +85,7 @@ def format_into_datasets(xs, ys, dataset_constructor):
   dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
   dataset_validation = dataset_constructor(xs[:, validation_indices], ys[:, validation_indices])
 
-return dataset_train, dataset_test, dataset_validation
+  return dataset_train, dataset_test, dataset_validation
 
 
 def find(s, ch):
