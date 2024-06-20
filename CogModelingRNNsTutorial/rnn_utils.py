@@ -115,9 +115,18 @@ def nan_in_dict(d):
     return any(nan_in_dict(v) for v in d.values())
 
 
+import jax
+import numpy as np
+import time
+from typing import Callable, Dict, Tuple, Optional, Any
+import haiku as hk
+import optax
+import matplotlib.pyplot as plt
+import chex
+
 def train_model(
     model_fun: Callable[[], hk.RNNCore],
-    dataset: DatasetRNN,
+    dataset: Any,  # Assuming dataset is an iterable that yields (xs, ys) tuples
     optimizer: optax.GradientTransformation = optax.adam(1e-3),
     random_key: Optional[chex.PRNGKey] = None,
     opt_state: Optional[optax.OptState] = None,
@@ -127,155 +136,97 @@ def train_model(
     loss_fun: str = 'categorical',
     do_plot: bool = True,
     truncate_seq_length: Optional[int] = None,
-    ) -> Tuple[hk.Params, optax.OptState, Dict[str, np.ndarray]]:
-  """Trains a model for a fixed number of steps.
+) -> Tuple[hk.Params, optax.OptState, Dict[str, np.ndarray]]:
+    """Trains a model for a fixed number of steps."""
 
-  Args:
-    model_fun: A function that, when called, returns a Haiku RNN object
-    dataset: A DatasetRNN, containing the data you wish to train on
-    optimizer: The optimizer you'd like to use to train the network
-    random_key: A jax random key, to be used in initializing the network
-    opt_state: An optimzier state suitable for opt.
-      If not specified, will initialize a new optimizer from scratch.
-    params:  A set of parameters suitable for the network given by make_network.
-      If not specified, will begin training a network from scratch.
-    n_steps: An integer giving the number of steps you'd like to train for
-      (default=1000)
-    penalty_scale: scalar weight applied to bottleneck penalty (default = 0)
-    loss_fun: string specifying type of loss function (default='categorical')
-    do_plot: Boolean that controls whether a learning curve is plotted
-      (default=True)
-    truncate_seq_length: truncate to sequence length (default=None)
+    n_steps = int(n_steps)
+    sample_xs, _ = next(dataset)  # Get a sample input, for shape
 
-  Returns:
-    params: Trained parameters
-    opt_state: Optimizer state at the end of training
-    losses: Losses on both datasets
-  """
-  n_steps = int(n_steps)
-  sample_xs, _ = next(dataset)  # Get a sample input, for shape
+    # Haiku, step one: Define the batched network
+    def unroll_network(xs):
+        core = model_fun()
+        batch_size = jnp.shape(xs)[1]
+        state = core.initial_state(batch_size)
+        ys, _ = hk.dynamic_unroll(core, xs, state)
+        return ys
 
-  # Haiku, step one: Define the batched network
-  def unroll_network(xs):
-    core = model_fun()
-    batch_size = jnp.shape(xs)[1]
-    state = core.initial_state(batch_size)
-    ys, _ = hk.dynamic_unroll(core, xs, state)
-    return ys
+    # Haiku, step two: Transform the network into a pair of functions
+    model = hk.transform(unroll_network)
 
-  # Haiku, step two: Transform the network into a pair of functions
-  # (model.init and model.apply)
-  model = hk.transform(unroll_network)
+    # PARSE INPUTS
+    if random_key is None:
+        random_key = jax.random.PRNGKey(0)
+    if params is None:
+        random_key, key1 = jax.random.split(random_key)
+        params = model.init(key1, sample_xs)
+    if opt_state is None:
+        opt_state = optimizer.init(params)
 
-  # PARSE INPUTS
-  if random_key is None:
-    random_key = jax.random.PRNGKey(0)
-  # If params have not been supplied, start training from scratch
-  if params is None:
-    random_key, key1 = jax.random.split(random_key)
-    params = model.init(key1, sample_xs)
-  # It an optimizer state has not been supplied, start optimizer from scratch
-  if opt_state is None:
-    opt_state = optimizer.init(params)
+    def categorical_log_likelihood(labels: np.ndarray, output_logits: np.ndarray) -> float:
+        mask = jnp.logical_not(labels < 0)
+        log_probs = jax.nn.log_softmax(output_logits)
+        one_hot_labels = jax.nn.one_hot(labels[:, :, 0], num_classes=output_logits.shape[-1])
+        log_liks = one_hot_labels * log_probs
+        masked_log_liks = jnp.multiply(log_liks, mask)
+        loss = -jnp.nansum(masked_log_liks)
+        return loss
 
-  def categorical_log_likelihood(
-      labels: np.ndarray, output_logits: np.ndarray
-  ) -> float:
-    # Mask any errors for which label is negative
-    mask = jnp.logical_not(labels < 0)
-    log_probs = jax.nn.log_softmax(output_logits)
-    if labels.shape[2] != 1:
-      raise ValueError(
-          'Categorical loss function requires targets to be of dimensionality'
-          ' (n_timesteps, n_episodes, 1)'
-      )
-    one_hot_labels = jax.nn.one_hot(
-        labels[:, :, 0], num_classes=output_logits.shape[-1]
-    )
-    log_liks = one_hot_labels * log_probs
-    masked_log_liks = jnp.multiply(log_liks, mask)
-    loss = -jnp.nansum(masked_log_liks)
-    return loss
+    def categorical_loss(params, xs: np.ndarray, labels: np.ndarray, random_key) -> float:
+        output_logits = model.apply(params, random_key, xs)
+        loss = categorical_log_likelihood(labels, output_logits)
+        return loss
 
-  def categorical_loss(
-      params, xs: np.ndarray, labels: np.ndarray, random_key
-  ) -> float:
-    output_logits = model.apply(params, random_key, xs)
-    loss = categorical_log_likelihood(labels, output_logits)
-    return loss
+    def penalized_categorical_loss(params, xs, targets, random_key, penalty_scale=penalty_scale) -> float:
+        model_output = model.apply(params, random_key, xs)
+        output_logits = model_output[:, :, :-1]
+        penalty = jnp.sum(model_output[:, :, -1])
+        loss = categorical_log_likelihood(targets, output_logits) + penalty_scale * penalty
+        return loss
 
-  def penalized_categorical_loss(
-      params, xs, targets, random_key, penalty_scale=penalty_scale
-  ) -> float:
-    """Treats the last element of the model outputs as a penalty."""
-    # (n_steps, n_episodes, n_targets)
-    model_output = model.apply(params, random_key, xs)
-    output_logits = model_output[:, :, :-1]
-    penalty = jnp.sum(model_output[:, :, -1])  # ()
-    loss = (
-        categorical_log_likelihood(targets, output_logits)
-        + penalty_scale * penalty
-    )
-    return loss
+    losses = {
+        'categorical': categorical_loss,
+        'penalized_categorical': penalized_categorical_loss,
+    }
+    compute_loss = jax.jit(losses[loss_fun])
 
-  losses = {
-      'categorical': categorical_loss,
-      'penalized_categorical': penalized_categorical_loss,
-  }
-  compute_loss = jax.jit(losses[loss_fun])
+    @jax.jit
+    def train_step(params, opt_state, xs, ys, random_key) -> Tuple[float, Any, Any]:
+        loss, grads = jax.value_and_grad(compute_loss, argnums=0)(params, xs, ys, random_key)
+        grads, opt_state = optimizer.update(grads, opt_state)
+        params = optax.apply_updates(params, grads)
+        return loss, params, opt_state
 
-  # Define what it means to train a single step
-  @jax.jit
-  def train_step(
-      params, opt_state, xs, ys, random_key
-  ) -> Tuple[float, Any, Any]:
-    loss, grads = jax.value_and_grad(compute_loss, argnums=0)(
-        params, xs, ys, random_key
-    )
-    grads, opt_state = optimizer.update(grads, opt_state)
-    params = optax.apply_updates(params, grads)
-    return loss, params, opt_state
+    training_loss = []
+    t_start = time.time()
+    for step in jnp.arange(n_steps):
+        random_key, key_i = jax.random.split(random_key, 2)
+        xs, ys = next(dataset)
+        if truncate_seq_length is not None and truncate_seq_length < xs.shape[0]:
+            xs = xs[:truncate_seq_length]
+            ys = ys[:truncate_seq_length]
 
-  # Train the network!
-  training_loss = []
-  t_start = time.time()
-  for step in jnp.arange(n_steps):
-    random_key, key_i = jax.random.split(random_key, 2)
-    # Train on training data
-    xs, ys = next(dataset)
-    if (truncate_seq_length is not None) and (truncate_seq_length < xs.shape[0]):
-      xs = xs[:truncate_seq_length]
-      ys = ys[:truncate_seq_length]
+        loss, params, opt_state = train_step(params, opt_state, xs, ys, key_i)
 
-    loss, params, opt_state = train_step(params, opt_state, xs, ys, key_i)
+        if step % 10 == 9:
+            training_loss.append(float(loss))
+            print(f'\rStep {step + 1} of {n_steps}; Loss: {loss:.4e}. (Time: {time.time()-t_start:.1f}s)', end='')
 
-    # Log every 10th step
-    if step % 10 == 9:
-      training_loss.append(float(loss))
-      print((f'\rStep {step + 1} of {n_steps}; '
-             f'Loss: {loss:.4e}. '
-             f'(Time: {time.time()-t_start:.1f}s)'), end='')
+    if n_steps > 1 and do_plot:
+        plt.figure()
+        plt.semilogy(training_loss, color='black')
+        plt.xlabel('Training Step')
+        plt.ylabel('Mean Loss')
+        plt.title('Loss over Training')
 
-  # If we actually did any training, print final loss and make a nice plot
-  if n_steps > 1 and do_plot:
-    plt.figure()
-    plt.semilogy(training_loss, color='black')
-    plt.xlabel('Training Step')
-    plt.ylabel('Mean Loss')
-    plt.title('Loss over Training')
+    losses = {'training_loss': np.array(training_loss)}
 
-  losses = {
-      'training_loss': np.array(training_loss),
-  }
+    if any(np.isnan(params[key]).any() for key in params):
+        print(params)
+        raise ValueError('NaN in params')
+    if len(training_loss) > 0 and np.isnan(training_loss[-1]):
+        raise ValueError('NaN in loss')
 
-  # Check if anything has become NaN that should not be NaN
-  if nan_in_dict(params):
-    print(params)
-    raise ValueError('NaN in params')
-  if len(training_loss) > 0 and np.isnan(training_loss[-1]):
-    raise ValueError('NaN in loss')
-
-  return params, opt_state, losses
+    return params, opt_state, losses
 
 
 def fit_model(
@@ -289,94 +240,78 @@ def fit_model(
     n_steps_per_call: int = 500,
     n_steps_max: int = 2000,
     return_all_losses=False,
-    ):
-  """Fits a model to convergence, by repeatedly calling train_model.
-  
-  Args:
-    model_fun: A function that, when called, returns a Haiku RNN object
-    dataset_train: A DatasetRNN, containing the training data
-    dataset_test: A DatasetRNN, containing the test data used to determine convergence
-    optimizer: The optimizer you'd like to use to train the network
-    loss_fun: string specifying type of loss function (default='categorical')
-    convergence_thresh: float, the fractional change in loss in one timestep must be below
-      this for training to end (default=1e-5).
-    random_key: A jax random key, to be used in initializing the network
-    n_steps_per_call: The number of steps to give to train_model (default=1000)
-    n_steps_max: The maximum number of iterations to run, even if convergence
-      is not reached (default=1000)
-    return_all_losses: if True, return list of all losses over training.
-  """
-  if random_key is None:
-    random_key = jax.random.PRNGKey(0)
+):
+    """Fits a model to convergence, by repeatedly calling train_model."""
+    if random_key is None:
+        random_key = jax.random.PRNGKey(0)
 
-  # Initialize the model
-  params, opt_state, _ = train_model(
-      model_fun,
-      dataset_train,
-      optimizer=optimizer,
-      n_steps=0,
-  )
-
-  # Train until the loss stops going down
-  continue_training = True
-  converged = False
-  loss = np.inf
-  n_calls_to_train_model = 0
-  all_losses = []
-  while continue_training:
-    params, opt_state, train_losses = train_model(
+    params, opt_state, _ = train_model(
         model_fun,
         dataset_train,
-        params=params,
-        opt_state=opt_state,
         optimizer=optimizer,
-        loss_fun=loss_fun,
-        do_plot=False,
-        n_steps=n_steps_per_call,
-    )
-    n_calls_to_train_model += 1
-    t_start = time.time()
-
-    # Evaluate the model on the test dataset
-    _, _, test_losses = train_model(
-        model_fun,
-        dataset_test,
-        params=params,
-        opt_state=opt_state,
-        optimizer=optimizer,
-        loss_fun=loss_fun,
-        do_plot=False,
         n_steps=0,
     )
-    
-    loss_new = test_losses['training_loss'][-1]
-    all_losses += list(train_losses['training_loss'])
-    # Declare "converged" if loss has not improved very much (but has improved)
-    if not np.isinf(loss): 
-      convergence_value = np.abs((loss_new - loss)) / loss
-      converged = convergence_value < convergence_thresh
 
-    # Check if converged + print status.
-    if converged:
-      msg = '\nModel Converged!'
-      continue_training = False
-    elif (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
-      msg = '\nMaximum iterations reached'
-      if np.isinf(loss):
-        msg += '.'
-      else:
-        msg += f', but model has reached \nconvergence value of {convergence_value:0.7g} which is greater than {convergence_thresh}.'
-      continue_training = False
+    continue_training = True
+    converged = False
+    loss = np.inf
+    n_calls_to_train_model = 0
+    all_losses = []
+    while continue_training:
+        params, opt_state, train_losses = train_model(
+            model_fun,
+            dataset_train,
+            params=params,
+            opt_state=opt_state,
+            optimizer=optimizer,
+            loss_fun=loss_fun,
+            do_plot=False,
+            n_steps=n_steps_per_call,
+        )
+        n_calls_to_train_model += 1
+        t_start = time.time()
+
+        _, _, test_losses = train_model(
+            model_fun,
+            dataset_test,
+            params=params,
+            opt_state=opt_state,
+            optimizer=optimizer,
+            loss_fun=loss_fun,
+            do_plot=False,
+            n_steps=0,
+        )
+
+        if not test_losses['training_loss']:
+            raise ValueError("Test losses are empty. Ensure that train_model returns valid losses.")
+        
+        loss_new = test_losses['training_loss'][-1]
+        all_losses += list(train_losses['training_loss'])
+
+        if not np.isinf(loss): 
+            convergence_value = np.abs((loss_new - loss)) / loss
+            converged = convergence_value < convergence_thresh
+
+        if converged:
+            msg = '\nModel Converged!'
+            continue_training = False
+        elif (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
+            msg = '\nMaximum iterations reached'
+            if np.isinf(loss):
+                msg += '.'
+            else:
+                msg += f', but model has reached \nconvergence value of {convergence_value:0.7g} which is greater than {convergence_thresh}.'
+            continue_training = False
+        else:
+            update_msg = '' if np.isinf(loss) else f'(convergence_value = {convergence_value:0.7g}) '
+            msg = f'\nModel not yet converged {update_msg}- Running more steps of gradient descent.'
+        print(msg + f' Time elapsed = {time.time()-t_start:.1f}s.')
+        loss = loss_new
+
+    if return_all_losses:
+        return params, loss, all_losses
     else:
-      update_msg = '' if np.isinf(loss) else f'(convergence_value = {convergence_value:0.7g}) '
-      msg = f'\nModel not yet converged {update_msg}- Running more steps of gradient descent.'
-    print(msg + f' Time elapsed = {time.time()-t_start:0.1}s.')
-    loss = loss_new
-
-  if return_all_losses:
-    return params, loss, all_losses
-  else:
-    return params, loss
+        return params, loss
 
 
 def eval_model(
