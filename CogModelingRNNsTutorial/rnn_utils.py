@@ -280,7 +280,8 @@ def train_model(
 
 def fit_model(
     model_fun,
-    dataset,
+    dataset_train,
+    dataset_test,
     optimizer: Optional = None,
     loss_fun: str = 'categorical',
     convergence_thresh: float = 1e-5,
@@ -293,7 +294,8 @@ def fit_model(
   
   Args:
     model_fun: A function that, when called, returns a Haiku RNN object
-    dataset: A DatasetRNN, containing the data you wish to train on
+    dataset_train: A DatasetRNN, containing the training data
+    dataset_test: A DatasetRNN, containing the test data used to determine convergence
     optimizer: The optimizer you'd like to use to train the network
     loss_fun: string specifying type of loss function (default='categorical')
     convergence_thresh: float, the fractional change in loss in one timestep must be below
@@ -302,7 +304,7 @@ def fit_model(
     n_steps_per_call: The number of steps to give to train_model (default=1000)
     n_steps_max: The maximum number of iterations to run, even if convergence
       is not reached (default=1000)
-    return_all_losses: if True, return list of all loseses over training.
+    return_all_losses: if True, return list of all losses over training.
   """
   if random_key is None:
     random_key = jax.random.PRNGKey(0)
@@ -310,7 +312,7 @@ def fit_model(
   # Initialize the model
   params, opt_state, _ = train_model(
       model_fun,
-      dataset,
+      dataset_train,
       optimizer=optimizer,
       n_steps=0,
   )
@@ -322,9 +324,9 @@ def fit_model(
   n_calls_to_train_model = 0
   all_losses = []
   while continue_training:
-    params, opt_state, losses = train_model(
+    params, opt_state, train_losses = train_model(
         model_fun,
-        dataset,
+        dataset_train,
         params=params,
         opt_state=opt_state,
         optimizer=optimizer,
@@ -335,8 +337,20 @@ def fit_model(
     n_calls_to_train_model += 1
     t_start = time.time()
 
-    loss_new = losses['training_loss'][-1]
-    all_losses += list(losses['training_loss'])
+    # Evaluate the model on the test dataset
+    _, _, test_losses = train_model(
+        model_fun,
+        dataset_test,
+        params=params,
+        opt_state=opt_state,
+        optimizer=optimizer,
+        loss_fun=loss_fun,
+        do_plot=False,
+        n_steps=0,
+    )
+    
+    loss_new = test_losses['training_loss'][-1]
+    all_losses += list(train_losses['training_loss'])
     # Declare "converged" if loss has not improved very much (but has improved)
     if not np.isinf(loss): 
       convergence_value = np.abs((loss_new - loss)) / loss
