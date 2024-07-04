@@ -42,7 +42,7 @@ class BiRNN(hk.RNNCore):
         if self._vo:  # "o" = output -> feed previous output back in
             inputs = jnp.concatenate([inputs, value], axis=-1)
         if self._vs:  # "s" = state -> feed previous hidden state back in
-            inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
+            inputs = jnp.concatenate([inputs, state], axis=-1)
 
         next_state = self.value_lstm(inputs, state)
         next_hidden, next_cell = next_state
@@ -58,7 +58,7 @@ class BiRNN(hk.RNNCore):
         if self._ho:  # "o" = output -> feed previous output back in
             inputs = jnp.concatenate([inputs, habit], axis=-1)
         if self._hs:  # "s" = state -> feed previous hidden state back in
-            inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
+            inputs = jnp.concatenate([inputs, state], axis=-1)
 
         next_state = self.habit_lstm(inputs, state)
         next_hidden, next_cell = next_state
