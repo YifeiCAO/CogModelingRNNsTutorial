@@ -73,19 +73,17 @@ def format_into_datasets(xs, ys, dataset_constructor):
 
   # Calculate the number of sessions for each dataset
   n_train = int(n_sessions * 0.7)
-  n_test = int(n_sessions * 0.15)
 
   # Get indices for each dataset
   train_indices = indices[:n_train]
-  test_indices = indices[n_train:n_train + n_test]
-  validation_indices = indices[n_train + n_test:]
+
+  test_indices = indices[n_train:]
 
   # Create datasets using the indices
   dataset_train = dataset_constructor(xs[:, train_indices], ys[:, train_indices])
   dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
-  dataset_validation = dataset_constructor(xs[:, validation_indices], ys[:, validation_indices])
 
-  return dataset_train, dataset_test, dataset_validation
+  return dataset_train, dataset_test
 
 
 def find(s, ch):
