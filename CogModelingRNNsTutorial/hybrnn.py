@@ -11,6 +11,8 @@ class BiRNN(hk.RNNCore):
     def __init__(self, rl_params, network_params, init_value=0.5):
         super().__init__()
 
+        self._hs = rl_params['s']
+        self._vs = rl_params['s']
         self._ho = rl_params['o']
         self._vo = rl_params['o']
 
@@ -32,41 +34,44 @@ class BiRNN(hk.RNNCore):
         self.value_lstm = hk.LSTM(self._hidden_size)
         self.habit_lstm = hk.LSTM(self._hidden_size)
 
-def _value_rnn(self, state, value, action, reward):
-    pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
+    def _value_rnn(self, state, value, action, reward):
+        pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
 
-    inputs = jnp.concatenate(
-        [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
-    if self._vo:  # "o" = output -> feed previous output back in
-        inputs = jnp.concatenate([inputs, value], axis=-1)
+        inputs = jnp.concatenate(
+            [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
+        if self._vo:  # "o" = output -> feed previous output back in
+            inputs = jnp.concatenate([inputs, value], axis=-1)
+        if self._vs:  # "s" = state -> feed previous hidden state back in
+            inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
 
-    next_state = self.value_lstm(inputs, state)
-    next_hidden, next_cell = next_state.hidden, next_state.cell
+        next_state = self.value_lstm(inputs, state)
+        next_hidden, next_cell = next_state.hidden, next_state.cell
 
-    update = hk.Linear(1)(next_hidden)
-    value = (1 - self.forget) * value + self.forget * self.init_value
-    next_value = value + action * update
+        update = hk.Linear(1)(next_hidden)
+        value = (1 - self.forget) * value + self.forget * self.init_value
+        next_value = value + action * update
 
-    return next_value, next_state
+        return next_value, next_state
 
-def _habit_rnn(self, state, habit, action):
-    inputs = action
-    if self._ho:  # "o" = output -> feed previous output back in
-        inputs = jnp.concatenate([inputs, habit], axis=-1)
+    def _habit_rnn(self, state, habit, action):
+        inputs = action
+        if self._ho:  # "o" = output -> feed previous output back in
+            inputs = jnp.concatenate([inputs, habit], axis=-1)
+        if self._hs:  # "s" = state -> feed previous hidden state back in
+            inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
 
-    next_state = self.habit_lstm(inputs, state)
-    next_hidden, next_cell = next_state.hidden, next_state.cell
+        next_state = self.habit_lstm(inputs, state)
+        next_hidden, next_cell = next_state.hidden, next_state.cell
 
-    next_habit = hk.Linear(self._n_actions)(next_hidden)
+        next_habit = hk.Linear(self._n_actions)(next_hidden)
 
-    return next_habit, next_state
-
+        return next_habit, next_state
 
     def __call__(self, inputs: jnp.ndarray, prev_state: jnp.ndarray):
         h_state, v_state, habit, value = prev_state
-        action = inputs[:, 0]  # shape: (batch_size, )
+        action = inputs[:, 0:1]  # shape: (batch_size, )
         reward = inputs[:, -1]  # shape: (batch_size,)
-        action_onehot = jax.nn.one_hot(action, 2)
+        action_onehot = action
         
         # Value module: update/create new values
         next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
