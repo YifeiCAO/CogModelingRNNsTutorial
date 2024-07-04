@@ -35,7 +35,7 @@ class BiRNN(hk.RNNCore):
         update = hk.Linear(self._n_actions)(next_state[0])
         next_value = (1 - self.forget) * value + self.forget * update + action * self.init_value
 
-        return next_value, (new_state, new_cell)
+        return next_value, (next_state, next_cell)
 
     def _habit_rnn(self, state, habit, action):
         inputs = jnp.concatenate([action, habit], axis=-1)
@@ -47,7 +47,7 @@ class BiRNN(hk.RNNCore):
         # Determine new habit from the LSTM's hidden state
         next_habit = hk.Linear(self._n_actions)(next_state[0])
 
-        return next_habit, (new_state, new_cell)
+        return next_habit, (next_state, next_cell)
 
     def __call__(self, inputs: jnp.ndarray, prev_state: jnp.ndarray):
         h_state, v_state, habit, value = prev_state
