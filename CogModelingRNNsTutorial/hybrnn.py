@@ -29,10 +29,10 @@ class BiRNN(hk.RNNCore):
 
         # Update state with LSTM
         next_state = self.value_lstm(inputs, state)
-        new_hidden, new_cell = next_state
+        #new_hidden, new_cell = next_state
 
         # Update value based on LSTM's hidden state
-        update = hk.Linear(self._n_actions)(next_state)
+        update = hk.Linear(self._n_actions)(next_state[0])
         next_value = (1 - self.forget) * value + self.forget * update + action * self.init_value
 
         return next_value, (new_state, new_cell)
@@ -42,10 +42,10 @@ class BiRNN(hk.RNNCore):
         
         # Update state with LSTM
         next_state = self.habit_lstm(inputs, state)
-        new_hidden, new_cell = next_state
+        #new_hidden, new_cell = next_state
         
         # Determine new habit from the LSTM's hidden state
-        next_habit = hk.Linear(self._n_actions)(next_state)
+        next_habit = hk.Linear(self._n_actions)(next_state[0])
 
         return next_habit, (new_state, new_cell)
 
