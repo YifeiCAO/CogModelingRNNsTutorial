@@ -11,8 +11,6 @@ class BiRNN(hk.RNNCore):
     def __init__(self, rl_params, network_params, init_value=0.5):
         super().__init__()
 
-        self._hs = rl_params['s']
-        self._vs = rl_params['s']
         self._ho = rl_params['o']
         self._vo = rl_params['o']
 
@@ -41,8 +39,6 @@ def _value_rnn(self, state, value, action, reward):
         [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
     if self._vo:  # "o" = output -> feed previous output back in
         inputs = jnp.concatenate([inputs, value], axis=-1)
-    if self._vs:  # "s" = state -> feed previous hidden state back in
-        inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
 
     next_state = self.value_lstm(inputs, state)
     next_hidden, next_cell = next_state.hidden, next_state.cell
@@ -57,8 +53,6 @@ def _habit_rnn(self, state, habit, action):
     inputs = action
     if self._ho:  # "o" = output -> feed previous output back in
         inputs = jnp.concatenate([inputs, habit], axis=-1)
-    if self._hs:  # "s" = state -> feed previous hidden state back in
-        inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
 
     next_state = self.habit_lstm(inputs, state)
     next_hidden, next_cell = next_state.hidden, next_state.cell
