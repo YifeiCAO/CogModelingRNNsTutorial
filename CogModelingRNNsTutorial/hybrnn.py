@@ -1,93 +1,70 @@
-from typing import Optional
 import haiku as hk
 import jax
 import jax.numpy as jnp
-
-RNNState = jnp.array
+from typing import Optional
 
 class BiRNN(hk.RNNCore):
-    """A hybrid RNN: "habit" processes action choices; "value" processes rewards."""
+    """A hybrid RNN: 'habit' processes action choices; 'value' processes rewards."""
 
     def __init__(self, rl_params, network_params, init_value=0.5):
         super().__init__()
-
         self._hs = rl_params['s']
         self._vs = rl_params['s']
         self._ho = rl_params['o']
         self._vo = rl_params['o']
-
         self.w_h = rl_params['w_h']
         self.w_v = rl_params['w_v']
         self.init_value = init_value
-
         self._n_actions = network_params['n_actions']
         self._hidden_size = network_params['hidden_size']
+        self.forget = jax.nn.sigmoid(hk.get_parameter('forget', (1,), init=hk.initializers.Constant(0.5)))
 
-        if rl_params['fit_forget']:
-            init = hk.initializers.RandomNormal(stddev=1, mean=0)
-            self.forget = jax.nn.sigmoid(  # 0 < forget < 1
-                hk.get_parameter('unsigmoid_forget', (1,), init=init)
-            )
-        else:
-            self.forget = rl_params['forget']
-
+        # Initialize LSTM layers
         self.value_lstm = hk.LSTM(self._hidden_size)
         self.habit_lstm = hk.LSTM(self._hidden_size)
 
     def _value_rnn(self, state, value, action, reward):
-        pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
+        pre_act_val = jnp.sum(value * action, axis=1)
+        inputs = jnp.concatenate([pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis], value], axis=-1)
 
-        inputs = jnp.concatenate(
-            [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
-        if self._vo:  # "o" = output -> feed previous output back in
-            inputs = jnp.concatenate([inputs, value], axis=-1)
-        if self._vs:  # "s" = state -> feed previous hidden state back in
-            inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
+        # Update state with LSTM
+        new_state, new_cell = self.value_lstm(inputs, state)
 
-        next_state = self.value_lstm(inputs, state)
-        next_hidden, next_cell = next_state.hidden, next_state.cell
+        # Update value based on LSTM's hidden state
+        update = hk.Linear(self._n_actions)(new_state)
+        next_value = (1 - self.forget) * value + self.forget * update + action * self.init_value
 
-        update = hk.Linear(1)(next_hidden)
-        value = (1 - self.forget) * value + self.forget * self.init_value
-        next_value = value + action * update
-
-        return next_value, next_state
+        return next_value, (new_state, new_cell)
 
     def _habit_rnn(self, state, habit, action):
-        inputs = action
-        if self._ho:  # "o" = output -> feed previous output back in
-            inputs = jnp.concatenate([inputs, habit], axis=-1)
-        if self._hs:  # "s" = state -> feed previous hidden state back in
-            inputs = jnp.concatenate([inputs, state.hidden], axis=-1)
+        inputs = jnp.concatenate([action, habit], axis=-1)
+        
+        # Update state with LSTM
+        new_state, new_cell = self.habit_lstm(inputs, state)
+        
+        # Determine new habit from the LSTM's hidden state
+        next_habit = hk.Linear(self._n_actions)(new_state)
 
-        next_state = self.habit_lstm(inputs, state)
-        next_hidden, next_cell = next_state.hidden, next_state.cell
-
-        next_habit = hk.Linear(self._n_actions)(next_hidden)
-
-        return next_habit, next_state
+        return next_habit, (new_state, new_cell)
 
     def __call__(self, inputs: jnp.ndarray, prev_state: jnp.ndarray):
         h_state, v_state, habit, value = prev_state
-        action = inputs[:, 0:1]  # shape: (batch_size, )
-        reward = inputs[:, -1]  # shape: (batch_size,)
-        action_onehot = action
-        
-        # Value module: update/create new values
-        next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
+        action = inputs[:, 0]
+        reward = inputs[:, -1]
+        action_onehot = jax.nn.one_hot(action, self._n_actions)
 
-        # Habit module: update/create new habit
+        # Update value and habit states
+        next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
         next_habit, next_h_state = self._habit_rnn(h_state, habit, action_onehot)
 
-        # Combine value and habit
-        logits = self.w_v * next_value + self.w_h * next_habit  # (bs, n_a)
+        # Combine updated values and habits into logits
+        logits = self.w_v * next_value + self.w_h * next_habit
 
         return logits, (next_h_state, next_v_state, next_habit, next_value)
 
     def initial_state(self, batch_size: Optional[int]):
-        return (
-            self.value_lstm.initial_state(batch_size),  # h_state
-            self.habit_lstm.initial_state(batch_size),  # v_state
-            0 * jnp.ones([batch_size, self._n_actions]),  # habit
-            self.init_value * jnp.ones([batch_size, self._n_actions]),  # value
-        )
+        # Initial state for both LSTM modules
+        return (self.value_lstm.initial_state(batch_size), 
+                self.habit_lstm.initial_state(batch_size),
+                0 * jnp.ones([batch_size, self._n_actions]),
+                self.init_value * jnp.ones([batch_size, self._n_actions]))
