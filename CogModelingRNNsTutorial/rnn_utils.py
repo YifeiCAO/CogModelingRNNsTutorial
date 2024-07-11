@@ -117,7 +117,8 @@ def nan_in_dict(d):
 
 def train_model(
     model_fun: Callable[[], hk.RNNCore],
-    dataset: DatasetRNN,
+    dataset_train: DatasetRNN,
+    dataset_test: DatasetRNN,
     optimizer: optax.GradientTransformation = optax.adam(1e-3),
     random_key: Optional[chex.PRNGKey] = None,
     opt_state: Optional[optax.OptState] = None,
@@ -132,7 +133,8 @@ def train_model(
 
   Args:
     model_fun: A function that, when called, returns a Haiku RNN object
-    dataset: A DatasetRNN, containing the data you wish to train on
+    dataset_train: A DatasetRNN, containing the training data
+    dataset_test: A DatasetRNN, containing the testing data
     optimizer: The optimizer you'd like to use to train the network
     random_key: A jax random key, to be used in initializing the network
     opt_state: An optimzier state suitable for opt.
@@ -153,7 +155,7 @@ def train_model(
     losses: Losses on both datasets
   """
   n_steps = int(n_steps)
-  sample_xs, _ = next(dataset)  # Get a sample input, for shape
+  sample_xs, _ = next(dataset_train)  # Get a sample input, for shape
 
   # Haiku, step one: Define the batched network
   def unroll_network(xs):
@@ -238,34 +240,47 @@ def train_model(
 
   # Train the network!
   training_loss = []
+  testing_loss = []
   t_start = time.time()
   for step in jnp.arange(n_steps):
     random_key, key_i = jax.random.split(random_key, 2)
     # Train on training data
-    xs, ys = next(dataset)
+    xs, ys = next(dataset_train)
     if (truncate_seq_length is not None) and (truncate_seq_length < xs.shape[0]):
       xs = xs[:truncate_seq_length]
       ys = ys[:truncate_seq_length]
 
     loss, params, opt_state = train_step(params, opt_state, xs, ys, key_i)
+    training_loss.append(float(loss))
+
+    # Compute testing loss
+    xs_test, ys_test = next(dataset_test)
+    if (truncate_seq_length is not None) and (truncate_seq_length < xs_test.shape[0]):
+      xs_test = xs_test[:truncate_seq_length]
+      ys_test = ys_test[:truncate_seq_length]
+
+    test_loss = compute_loss(params, xs_test, ys_test, key_i)
+    testing_loss.append(float(test_loss))
 
     # Log every 10th step
     if step % 10 == 9:
-      training_loss.append(float(loss))
       print((f'\rStep {step + 1} of {n_steps}; '
-             f'Loss: {loss:.4e}. '
+             f'Loss: {loss:.4e}; Test Loss: {test_loss:.4e}. '
              f'(Time: {time.time()-t_start:.1f}s)'), end='')
 
   # If we actually did any training, print final loss and make a nice plot
   if n_steps > 1 and do_plot:
     plt.figure()
-    plt.semilogy(training_loss, color='black')
+    plt.semilogy(training_loss, color='black', label='Training Loss')
+    plt.semilogy(testing_loss, color='red', label='Testing Loss')
     plt.xlabel('Training Step')
     plt.ylabel('Mean Loss')
     plt.title('Loss over Training')
+    plt.legend()
 
   losses = {
       'training_loss': np.array(training_loss),
+      'testing_loss': np.array(testing_loss),
   }
 
   # Check if anything has become NaN that should not be NaN
@@ -280,7 +295,8 @@ def train_model(
 
 def fit_model(
     model_fun,
-    dataset,
+    dataset_train,
+    dataset_test,
     optimizer: Optional = None,
     loss_fun: str = 'categorical',
     convergence_thresh: float = 1e-5,
@@ -293,10 +309,11 @@ def fit_model(
   
   Args:
     model_fun: A function that, when called, returns a Haiku RNN object
-    dataset: A DatasetRNN, containing the data you wish to train on
+    dataset_train: A DatasetRNN, containing the training data
+    dataset_test: A DatasetRNN, containing the testing data
     optimizer: The optimizer you'd like to use to train the network
     loss_fun: string specifying type of loss function (default='categorical')
-    convergence_thresh: float, the fractional change in loss in one timestep must be below
+    convergence_thresh: float, the fractional change in test loss in one timestep must be below
       this for training to end (default=1e-5).
     random_key: A jax random key, to be used in initializing the network
     n_steps_per_call: The number of steps to give to train_model (default=1000)
@@ -310,21 +327,24 @@ def fit_model(
   # Initialize the model
   params, opt_state, _ = train_model(
       model_fun,
-      dataset,
+      dataset_train,
+      dataset_test,
       optimizer=optimizer,
       n_steps=0,
   )
 
-  # Train until the loss stops going down
+  # Train until the test loss stops going down
   continue_training = True
   converged = False
   loss = np.inf
+  test_loss = np.inf
   n_calls_to_train_model = 0
   all_losses = []
   while continue_training:
     params, opt_state, losses = train_model(
         model_fun,
-        dataset,
+        dataset_train,
+        dataset_test,
         params=params,
         opt_state=opt_state,
         optimizer=optimizer,
@@ -335,11 +355,11 @@ def fit_model(
     n_calls_to_train_model += 1
     t_start = time.time()
 
-    loss_new = losses['training_loss'][-1]
-    all_losses += list(losses['training_loss'])
-    # Declare "converged" if loss has not improved very much (but has improved)
-    if not np.isinf(loss): 
-      convergence_value = np.abs((loss_new - loss)) / loss
+    test_loss_new = losses['testing_loss'][-1]
+    all_losses += list(losses['testing_loss'])
+    # Declare "converged" if test loss has not improved very much (but has improved)
+    if not np.isinf(test_loss): 
+      convergence_value = np.abs((test_loss_new - test_loss)) / test_loss
       converged = convergence_value < convergence_thresh
 
     # Check if converged + print status.
@@ -348,21 +368,22 @@ def fit_model(
       continue_training = False
     elif (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
       msg = '\nMaximum iterations reached'
-      if np.isinf(loss):
+      if np.isinf(test_loss):
         msg += '.'
       else:
         msg += f', but model has reached \nconvergence value of {convergence_value:0.7g} which is greater than {convergence_thresh}.'
       continue_training = False
     else:
-      update_msg = '' if np.isinf(loss) else f'(convergence_value = {convergence_value:0.7g}) '
+      update_msg = '' if np.isinf(test_loss) else f'(convergence_value = {convergence_value:0.7g}) '
       msg = f'\nModel not yet converged {update_msg}- Running more steps of gradient descent.'
     print(msg + f' Time elapsed = {time.time()-t_start:0.1}s.')
-    loss = loss_new
+    test_loss = test_loss_new
 
   if return_all_losses:
-    return params, loss, all_losses
+    return params, test_loss, all_losses
   else:
-    return params, loss
+    return params, test_loss
+
 
 
 def eval_model(

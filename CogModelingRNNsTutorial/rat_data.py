@@ -66,24 +66,28 @@ def format_into_datasets(xs, ys, dataset_constructor):
     dataset_train: a dataset containing odd numbered sessions
   """
   n_sessions = xs.shape[1]
+    
+  # Define the session splits
+  n_train_sessions = 213
+  n_test_sessions = 46
+  n_validate_sessions = 46
 
-  # Create an array of indices and shuffle it
-  indices = np.arange(n_sessions)
-  np.random.shuffle(indices)
+  # Ensure the input data has enough sessions
+  total_sessions = xs.shape[1]
+  assert total_sessions >= (n_train_sessions + n_test_sessions + n_validate_sessions), \
+      "Input data does not have enough sessions for the specified splits."
 
-  # Calculate the number of sessions for each dataset
-  n_train = int(n_sessions * 0.7)
+  # Split the data into train, test, and validate datasets
+  train_indices = np.arange(n_train_sessions)
+  test_indices = np.arange(n_train_sessions, n_train_sessions + n_test_sessions)
+  validate_indices = np.arange(total_sessions - n_validate_sessions, total_sessions)
 
-  # Get indices for each dataset
-  train_indices = indices[:n_train]
-
-  test_indices = indices[n_train:]
-
-  # Create datasets using the indices
   dataset_train = dataset_constructor(xs[:, train_indices], ys[:, train_indices])
   dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
+  dataset_validate = dataset_constructor(xs[:, validate_indices], ys[:, validate_indices])
 
-  return dataset_train, dataset_test
+  return dataset_train, dataset_test, dataset_validate
+
 
 
 def find(s, ch):
