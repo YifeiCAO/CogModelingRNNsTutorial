@@ -717,8 +717,10 @@ class Hk_PreserveConAgentQ(hk.RNNCore):
 
     choice_onehot = jax.nn.one_hot(choice, num_classes=2)  # shape: (batch_size, 2)
     chosen_value = jnp.sum(prev_qs * choice_onehot, axis=1)  # shape: (batch_size)
+    unchosen_value = jnp.sum(prev_qs * (np.ones([1,2]) - choice_onehot), axis=1)
     deltas = reward - chosen_value  # shape: (batch_size)
-    new_qs = prev_qs + self.alpha * choice_onehot * jnp.expand_dims(deltas, -1) + self.alpha * (np.ones([1,2]) - choice_onehot) * (1 - jnp.expand_dims(deltas, -1))
+    deltas_con = (1 - reward) - unchosen_value
+    new_qs = prev_qs + self.alpha * choice_onehot * jnp.expand_dims(deltas, -1) + self.alpha * (np.ones([1,2]) - choice_onehot) * jnp.expand_dims(deltas_con, -1)
     
     # Compute perseverance values
     perseverance_values = self.perseverance * choice_onehot  # shape: (batch_size, 2)
