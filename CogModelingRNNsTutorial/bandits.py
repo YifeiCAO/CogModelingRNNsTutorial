@@ -689,7 +689,7 @@ class Hk_PreserveConAgentQ(hk.RNNCore):
   """
 
   def __init__(self, n_cs=4):
-    super(Hk_PreserveAgentQ, self).__init__()
+    super(Hk_PreserveConAgentQ, self).__init__()
 
     # Haiku parameters
     alpha_unsigmoid = hk.get_parameter(
