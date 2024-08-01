@@ -58,7 +58,7 @@ class BiConRNN(hk.RNNCore):
 
   def _value_con_rnn(self, state, value, action, reward):
 
-    pre_act_val = jnp.sum(value * (np.ones(1,2) - action), axis=1)  # (batch_s, 1)
+    pre_act_val = jnp.sum(value * (np.ones([1,2]) - action), axis=1)  # (batch_s, 1)
 
     inputs = jnp.concatenate(
         [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
@@ -71,7 +71,7 @@ class BiConRNN(hk.RNNCore):
 
     update = hk.Linear(1)(next_state)
     value = (1 - self.forget) * value + self.forget * self.init_value
-    next_value = value + (np.ones(1,2) - action) * update
+    next_value = value + (np.ones([1,2]) - action) * update
 
     return next_con_value, next_state
 
