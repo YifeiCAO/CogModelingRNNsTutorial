@@ -73,7 +73,7 @@ class BiConRNN(hk.RNNCore):
     value = (1 - self.forget) * value + self.forget * self.init_value
     next_value = value + (np.ones([1,2]) - action) * update
 
-    return next_con_value, next_state
+    return next_value, next_state
 
   def _habit_rnn(self, state, habit, action):
 
