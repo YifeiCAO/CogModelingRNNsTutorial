@@ -123,7 +123,7 @@ def train_model(
     optimizer: optax.GradientTransformation = optax.chain(
         optax.add_decayed_weights(1e-5),  # 添加 L2 正则化
         optax.adam(1e-4)
-    )
+    ),
     random_key: Optional[chex.PRNGKey] = None,
     opt_state: Optional[optax.OptState] = None,
     params: Optional[hk.Params] = None,
