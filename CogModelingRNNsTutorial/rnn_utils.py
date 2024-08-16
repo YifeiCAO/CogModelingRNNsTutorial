@@ -238,7 +238,7 @@ def train_model(
     loss, grads = jax.value_and_grad(compute_loss, argnums=0)(
         params, xs, ys, random_key
     )
-    grads, opt_state = optimizer.update(grads, opt_state)
+    grads, opt_state = optimizer.update(grads, opt_state, params=params)
     params = optax.apply_updates(params, grads)
     return loss, params, opt_state
 
