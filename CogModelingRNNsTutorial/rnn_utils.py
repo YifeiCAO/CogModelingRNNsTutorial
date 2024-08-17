@@ -530,7 +530,7 @@ def fit_model(
   first_loss = None
   early_stop_triggered = False
   
-  while continue_training and not early_stop_triggered:
+  while continue_training:
     params, opt_state, losses = train_model(
         model_fun,
         dataset_train,
@@ -558,6 +558,7 @@ def fit_model(
             print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
             early_stop_triggered = True
             continue_training = False
+            break
 
     # 检查是否达到最大迭代次数
     if (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
@@ -571,6 +572,7 @@ def fit_model(
     return params, test_loss, all_losses
   else:
     return params, test_loss
+
 
 
 
