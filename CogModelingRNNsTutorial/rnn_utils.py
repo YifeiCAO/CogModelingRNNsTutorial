@@ -392,114 +392,94 @@ def fit_model(
     model_fun,
     dataset_train,
     dataset_test,
-    optimizer: Optional = None,
+    optimizer=None,
     loss_fun: str = 'categorical',
-    convergence_thresh: float = 1e-5,
-    random_key: Optional = None,
+    random_key=None,
     n_steps_per_call: int = 500,
     n_steps_max: int = 2000,
     return_all_losses=False,
-    early_stop_patience: int = 200,  # 增加这个参数
+    early_stop_patience: int = 200,  # 早停的耐心参数
     ):
-  """Fits a model to convergence, by repeatedly calling train_model.
+    """Fits a model to convergence, by repeatedly calling train_model.
   
-  Args:
-    model_fun: A function that, when called, returns a Haiku RNN object
-    dataset_train: A DatasetRNN, containing the training data
-    dataset_test: A DatasetRNN, containing the testing data
-    optimizer: The optimizer you'd like to use to train the network
-    loss_fun: string specifying type of loss function (default='categorical')
-    convergence_thresh: float, the fractional change in test loss in one timestep must be below
-      this for training to end (default=1e-5).
-    random_key: A jax random key, to be used in initializing the network
-    n_steps_per_call: The number of steps to give to train_model (default=1000)
-    n_steps_max: The maximum number of iterations to run, even if convergence
-      is not reached (default=1000)
-    return_all_losses: if True, return list of all loseses over training.
-    early_stop_patience: int, the number of steps without improvement before stopping (default=200)
-  """
-  if random_key is None:
-    random_key = jax.random.PRNGKey(0)
+    Args:
+        model_fun: A function that, when called, returns a Haiku RNN object
+        dataset_train: A DatasetRNN, containing the training data
+        dataset_test: A DatasetRNN, containing the testing data
+        optimizer: The optimizer you'd like to use to train the network
+        loss_fun: string specifying type of loss function (default='categorical')
+        random_key: A jax random key, to be used in initializing the network
+        n_steps_per_call: The number of steps to give to train_model (default=500)
+        n_steps_max: The maximum number of iterations to run, even if convergence
+          is not reached (default=2000)
+        return_all_losses: if True, return list of all loseses over training.
+        early_stop_patience: int, the number of steps without improvement before stopping (default=200)
+    """
+    if random_key is None:
+        random_key = jax.random.PRNGKey(0)
 
-  # Initialize the model
-  params, opt_state, _ = train_model(
-      model_fun,
-      dataset_train,
-      dataset_test,
-      optimizer=optimizer,
-      n_steps=0,
-  )
-
-  # Train until the test loss stops going down
-  continue_training = True
-  converged = False
-  loss = np.inf
-  test_loss = np.inf
-  n_calls_to_train_model = 0
-  all_losses = []
-  
-  # 早停相关的变量
-  best_loss = np.inf
-  patience_counter = 0
-  
-  while continue_training:
-    params, opt_state, losses = train_model(
+    # Initialize the model
+    params, opt_state, _ = train_model(
         model_fun,
         dataset_train,
         dataset_test,
-        params=params,
-        opt_state=opt_state,
         optimizer=optimizer,
-        loss_fun=loss_fun,
-        do_plot=False,
-        n_steps=n_steps_per_call,
+        n_steps=0,
     )
-    n_calls_to_train_model += 1
-    t_start = time.time()
 
-    test_loss_new = losses['testing_loss'][-1]
-    all_losses += list(losses['testing_loss'])
-    
-    # 检查早停条件
-    if test_loss_new < best_loss:
-        best_loss = test_loss_new
-        patience_counter = 0  # 重置耐心计数器
+    # Train until the test loss stops going down
+    loss = np.inf
+    test_loss = np.inf
+    n_calls_to_train_model = 0
+    all_losses = []
+
+    # 早停相关的变量
+    best_loss = np.inf
+    patience_counter = 0
+
+    while True:
+        params, opt_state, losses = train_model(
+            model_fun,
+            dataset_train,
+            dataset_test,
+            params=params,
+            opt_state=opt_state,
+            optimizer=optimizer,
+            loss_fun=loss_fun,
+            do_plot=False,
+            n_steps=n_steps_per_call,
+        )
+        n_calls_to_train_model += 1
+        t_start = time.time()
+
+        test_loss_new = losses['testing_loss'][-1]
+        all_losses += list(losses['testing_loss'])
+
+        # 检查早停条件
+        if test_loss_new < best_loss:
+            best_loss = test_loss_new
+            patience_counter = 0  # 重置耐心计数器
+        else:
+            patience_counter += 1  # 增加耐心计数器
+
+        # 如果耐心计数器超过早停阈值，则停止训练
+        if patience_counter >= early_stop_patience:
+            print(f"\nEarly stopping triggered after {early_stop_patience} steps without improvement.")
+            break
+
+        # 打印状态更新
+        print(f'\nModel not yet converged - Running more steps of gradient descent. '
+              f'Time elapsed = {time.time() - t_start:.1f}s.')
+
+        # 检查是否达到最大步数限制
+        if (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
+            print('\nMaximum iterations reached.')
+            break
+
+    if return_all_losses:
+        return params, test_loss, all_losses
     else:
-        patience_counter += 1  # 增加耐心计数器
-
-    # 如果耐心计数器超过早停阈值，则停止训练
-    if patience_counter >= early_stop_patience:
-        print(f"\nEarly stopping triggered after {early_stop_patience} steps without improvement.")
-        break
-
-    # Declare "converged" if test loss has not improved very much (but has improved)
-    if not np.isinf(test_loss): 
-      convergence_value = np.abs((test_loss_new - test_loss)) / test_loss
-      converged = convergence_value < convergence_thresh
-
-    # Check if converged + print status.
-    if converged:
-      msg = '\nModel Converged!'
-      continue_training = False
-    elif (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
-      msg = '\nMaximum iterations reached'
-      if np.isinf(test_loss):
-        msg += '.'
-      else:
-        msg += f', but model has reached \nconvergence value of {convergence_value:0.7g} which is greater than {convergence_thresh}.'
-      continue_training = False
-    else:
-      update_msg = '' if np.isinf(test_loss) else f'(convergence_value = {convergence_value:0.7g}) '
-      msg = f'\nModel not yet converged {update_msg}- Running more steps of gradient descent.'
-    print(msg + f' Time elapsed = {time.time()-t_start:0.1}s.')
-    test_loss = test_loss_new
-
-  if return_all_losses:
-    return params, test_loss, all_losses
-  else:
-    return params, test_loss
-
-
+        return params, test_loss
 
 
 def eval_model(
