@@ -555,7 +555,7 @@ def fit_model(
 #         first_loss = test_loss_new
     
     # 检查第 early_stop_step 步与第 1 步的损失
-    if n_calls_to_train_model * n_steps_per_call == early_stop_step:
+    if (n_calls_to_train_model * n_steps_per_call) % early_stop_step == 0:
         if test_loss_new >= first_loss:
             print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
             early_stop_triggered = True
