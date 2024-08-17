@@ -544,16 +544,18 @@ def fit_model(
     )
     n_calls_to_train_model += 1
     t_start = time.time()
+    
+    first_loss = losses['testing_loss'][0]
 
     test_loss_new = losses['testing_loss'][-1]
     all_losses += list(losses['testing_loss'])
 
     # 在第一个n_steps_per_call步骤后记录第一个损失
-    if first_loss is None:
-        first_loss = test_loss_new
+#     if first_loss is None:
+#         first_loss = test_loss_new
     
     # 检查第 early_stop_step 步与第 1 步的损失
-    if (n_calls_to_train_model * n_steps_per_call) % early_stop_step == 0:
+    if n_calls_to_train_model * n_steps_per_call == early_stop_step:
         if test_loss_new >= first_loss:
             print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
             early_stop_triggered = True
