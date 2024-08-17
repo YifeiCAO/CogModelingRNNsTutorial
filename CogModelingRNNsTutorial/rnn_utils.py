@@ -481,99 +481,6 @@ def train_model(
 #     else:
 #         return params, test_loss
 
-# def fit_model(
-#     model_fun,
-#     dataset_train,
-#     dataset_test,
-#     optimizer: Optional = None,
-#     loss_fun: str = 'categorical',
-#     random_key: Optional = None,
-#     n_steps_per_call: int = 500,
-#     n_steps_max: int = 2000,
-#     return_all_losses=False,
-#     early_stop_step: int = 200,  # 用于控制检查的步数
-#     ):
-#   """Fits a model to convergence, by repeatedly calling train_model.
-  
-#   Args:
-#     model_fun: A function that, when called, returns a Haiku RNN object
-#     dataset_train: A DatasetRNN, containing the training data
-#     dataset_test: A DatasetRNN, containing the testing data
-#     optimizer: The optimizer you'd like to use to train the network
-#     loss_fun: string specifying type of loss function (default='categorical')
-#     random_key: A jax random key, to be used in initializing the network
-#     n_steps_per_call: The number of steps to give to train_model (default=1000)
-#     n_steps_max: The maximum number of iterations to run, even if convergence
-#       is not reached (default=1000)
-#     return_all_losses: if True, return list of all loseses over training.
-#     early_stop_step: int, the step at which to compare with the first step's loss (default=200)
-#   """
-#   if random_key is None:
-#     random_key = jax.random.PRNGKey(0)
-
-#   # Initialize the model
-#   params, opt_state, _ = train_model(
-#       model_fun,
-#       dataset_train,
-#       dataset_test,
-#       optimizer=optimizer,
-#       n_steps=0,
-#   )
-
-#   # Train until the test loss stops going down
-#   continue_training = True
-#   loss = np.inf
-#   test_loss = np.inf
-#   n_calls_to_train_model = 0
-#   all_losses = []
-
-#   first_loss = None
-#   early_stop_triggered = False
-  
-#   while continue_training:
-#     params, opt_state, losses = train_model(
-#         model_fun,
-#         dataset_train,
-#         dataset_test,
-#         params=params,
-#         opt_state=opt_state,
-#         optimizer=optimizer,
-#         loss_fun=loss_fun,
-#         do_plot=False,
-#         n_steps=n_steps_per_call,
-#     )
-#     n_calls_to_train_model += 1
-#     t_start = time.time()
-
-#     test_loss_new = losses['testing_loss'][-1]
-#     all_losses += list(losses['testing_loss'])
-
-#     # 在第一个n_steps_per_call步骤后记录第一个损失
-#     if first_loss is None:
-#         first_loss = test_loss_new
-    
-#     # 检查第 early_stop_step 步与第 1 步的损失
-#     if n_calls_to_train_model * n_steps_per_call == early_stop_step:
-#         if test_loss_new >= first_loss:
-#             print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
-#             early_stop_triggered = True
-#             continue_training = False
-#             break
-
-#     # 检查是否达到最大迭代次数
-#     if (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
-#       print(f"\nMaximum iterations reached. Final test loss: {test_loss_new:.4e}")
-#       continue_training = False
-
-#     print(f"Step {n_steps_per_call * n_calls_to_train_model} of {n_steps_max}; "
-#           f"Loss: {test_loss_new:.4e}. (Time: {time.time()-t_start:.1f}s)")
-
-#   if return_all_losses:
-#     return params, test_loss, all_losses
-#   else:
-#     return params, test_loss
-
-
 def fit_model(
     model_fun,
     dataset_train,
@@ -583,80 +490,88 @@ def fit_model(
     random_key: Optional = None,
     n_steps_per_call: int = 500,
     n_steps_max: int = 2000,
-    early_stop_step: int = 200,  # 使用早停机制并设置耐心计数器
     return_all_losses=False,
-):
-    """Fits a model with early stopping based on test loss.
+    early_stop_step: int = 200,  # 用于控制检查的步数
+    ):
+  """Fits a model to convergence, by repeatedly calling train_model.
+  
+  Args:
+    model_fun: A function that, when called, returns a Haiku RNN object
+    dataset_train: A DatasetRNN, containing the training data
+    dataset_test: A DatasetRNN, containing the testing data
+    optimizer: The optimizer you'd like to use to train the network
+    loss_fun: string specifying type of loss function (default='categorical')
+    random_key: A jax random key, to be used in initializing the network
+    n_steps_per_call: The number of steps to give to train_model (default=1000)
+    n_steps_max: The maximum number of iterations to run, even if convergence
+      is not reached (default=1000)
+    return_all_losses: if True, return list of all loseses over training.
+    early_stop_step: int, the step at which to compare with the first step's loss (default=200)
+  """
+  if random_key is None:
+    random_key = jax.random.PRNGKey(0)
 
-    Args:
-        model_fun: A function that, when called, returns a Haiku RNN object.
-        dataset_train: A DatasetRNN, containing the training data.
-        dataset_test: A DatasetRNN, containing the testing data.
-        optimizer: The optimizer you'd like to use to train the network.
-        loss_fun: string specifying type of loss function (default='categorical').
-        random_key: A jax random key, to be used in initializing the network.
-        n_steps_per_call: The number of steps to give to train_model (default=500).
-        n_steps_max: The maximum number of iterations to run, even if convergence is not reached.
-        early_stop_step: Number of steps without improvement before stopping (default=200).
-        return_all_losses: if True, return list of all losses over training.
+  # Initialize the model
+  params, opt_state, _ = train_model(
+      model_fun,
+      dataset_train,
+      dataset_test,
+      optimizer=optimizer,
+      n_steps=0,
+  )
 
-    Returns:
-        params: Trained parameters.
-        test_loss: The final test loss.
-        all_losses (optional): All recorded test losses if return_all_losses is True.
-    """
-    if random_key is None:
-        random_key = jax.random.PRNGKey(0)
+  # Train until the test loss stops going down
+  continue_training = True
+  loss = np.inf
+  test_loss = np.inf
+  n_calls_to_train_model = 0
+  all_losses = []
 
-    # Initialize the model
-    params, opt_state, _ = train_model(
+  first_loss = None
+  early_stop_triggered = False
+  
+  while continue_training:
+    params, opt_state, losses = train_model(
         model_fun,
         dataset_train,
         dataset_test,
+        params=params,
+        opt_state=opt_state,
         optimizer=optimizer,
-        n_steps=0,
+        loss_fun=loss_fun,
+        do_plot=False,
+        n_steps=n_steps_per_call,
     )
+    n_calls_to_train_model += 1
+    t_start = time.time()
 
-    # Training loop
-    best_loss = np.inf
-    patience_counter = 0
-    test_loss = np.inf
-    all_losses = []
-    steps_completed = 0
+    test_loss_new = losses['testing_loss'][-1]
+    all_losses += list(losses['testing_loss'])
+
+    # 在第一个n_steps_per_call步骤后记录第一个损失
+    if first_loss is None:
+        first_loss = test_loss_new
     
-    while steps_completed < n_steps_max:
-        params, opt_state, losses = train_model(
-            model_fun,
-            dataset_train,
-            dataset_test,
-            params=params,
-            opt_state=opt_state,
-            optimizer=optimizer,
-            loss_fun=loss_fun,
-            do_plot=False,
-            n_steps=n_steps_per_call,
-        )
-
-        test_loss_new = losses['testing_loss'][-1]
-        all_losses += list(losses['testing_loss'])
-        
-        if test_loss_new < best_loss:
-            best_loss = test_loss_new
-            patience_counter = 0
-        else:
-            patience_counter += 1
-
-        if patience_counter >= early_stop_step:
-            print(f"\nEarly stopping triggered after {steps_completed} steps.")
+    # 检查第 early_stop_step 步与第 1 步的损失
+    if (n_calls_to_train_model * n_steps_per_call) % early_stop_step == 0:
+        if test_loss_new >= first_loss:
+            print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
+            early_stop_triggered = True
+            continue_training = False
             break
 
-        steps_completed += n_steps_per_call
+    # 检查是否达到最大迭代次数
+    if (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
+      print(f"\nMaximum iterations reached. Final test loss: {test_loss_new:.4e}")
+      continue_training = False
 
-    if return_all_losses:
-        return params, test_loss, all_losses
-    else:
-        return params, test_loss
+    print(f"Step {n_steps_per_call * n_calls_to_train_model} of {n_steps_max}; "
+          f"Loss: {test_loss_new:.4e}. (Time: {time.time()-t_start:.1f}s)")
 
+  if return_all_losses:
+    return params, test_loss, all_losses
+  else:
+    return params, test_loss
 
 
 def eval_model(
