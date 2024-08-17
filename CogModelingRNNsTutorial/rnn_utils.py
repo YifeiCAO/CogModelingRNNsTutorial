@@ -557,6 +557,7 @@ def fit_model(
         if test_loss_new >= first_loss:
             print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
             early_stop_triggered = True
+            continue_training = False
 
     # 检查是否达到最大迭代次数
     if (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
@@ -570,6 +571,7 @@ def fit_model(
     return params, test_loss, all_losses
   else:
     return params, test_loss
+
 
 
 
