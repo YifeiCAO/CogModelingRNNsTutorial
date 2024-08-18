@@ -68,9 +68,9 @@ def format_into_datasets(xs, ys, dataset_constructor):
   n_sessions = xs.shape[1]
     
   # Define the session splits
-  n_train_sessions = 560
-  n_test_sessions = 120
-  n_validate_sessions = 120
+  n_train_sessions = 585
+  n_test_sessions = 72
+  n_validate_sessions = 72
 
   # Ensure the input data has enough sessions
   total_sessions = xs.shape[1]
