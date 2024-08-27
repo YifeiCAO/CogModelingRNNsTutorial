@@ -51,42 +51,42 @@ def load_data_for_one_rat(fname=None, data_dir=DATA_DIR):
   return xs, ys, fname
 
 
-def format_into_datasets(xs, ys, dataset_constructor):
-  """Format inputs xs and outputs ys into dataset.
+import numpy as np  # 确保导入了numpy
 
-  Args:
-    xs: n_trials x n_sessions x 2 array of choices and rewards
-    ys: n_trials x n_sessions x 1 array of next choice. choice value of -1 denotes
-      instructed trial or padding at end of session.
-    dataset_constructor: constructor that accepts xs and ys as arguments; probably
-      use rnn_utils.DatasetRNN
+def format_into_datasets(xs, ys, dataset_constructor, n_train_sessions, n_test_sessions, n_validate_sessions):
+    """Format inputs xs and outputs ys into dataset.
 
-  Returns:
-    dataset_train: a dataset containing even numbered sessions
-    dataset_train: a dataset containing odd numbered sessions
-  """
-  n_sessions = xs.shape[1]
-    
-  # Define the session splits
-  n_train_sessions = 537
-  n_test_sessions = 66
-  n_validate_sessions = 66
+    Args:
+        xs: n_trials x n_sessions x 2 array of choices and rewards
+        ys: n_trials x n_sessions x 1 array of next choice. choice value of -1 denotes
+          instructed trial or padding at end of session.
+        dataset_constructor: constructor that accepts xs and ys as arguments; probably
+          use rnn_utils.DatasetRNN
+        n_train_sessions: number of sessions for the training dataset
+        n_test_sessions: number of sessions for the test dataset
+        n_validate_sessions: number of sessions for the validation dataset
 
-  # Ensure the input data has enough sessions
-  total_sessions = xs.shape[1]
-  assert total_sessions >= (n_train_sessions + n_test_sessions + n_validate_sessions), \
-      "Input data does not have enough sessions for the specified splits."
+    Returns:
+        dataset_train: a dataset containing specified number of training sessions
+        dataset_test: a dataset containing specified number of test sessions
+        dataset_validate: a dataset containing specified number of validation sessions
+    """
+    # Ensure the input data has enough sessions
+    total_sessions = xs.shape[1]
+    assert total_sessions >= (n_train_sessions + n_test_sessions + n_validate_sessions), \
+        "Input data does not have enough sessions for the specified splits."
 
-  # Split the data into train, test, and validate datasets
-  train_indices = np.arange(n_train_sessions)
-  test_indices = np.arange(n_train_sessions, n_train_sessions + n_test_sessions)
-  validate_indices = np.arange(total_sessions - n_validate_sessions, total_sessions)
+    # Split the data into train, test, and validate datasets
+    train_indices = np.arange(n_train_sessions)
+    test_indices = np.arange(n_train_sessions, n_train_sessions + n_test_sessions)
+    validate_indices = np.arange(total_sessions - n_validate_sessions, total_sessions)
 
-  dataset_train = dataset_constructor(xs[:, train_indices], ys[:, train_indices])
-  dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
-  dataset_validate = dataset_constructor(xs[:, validate_indices], ys[:, validate_indices])
+    dataset_train = dataset_constructor(xs[:, train_indices], ys[:, train_indices])
+    dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
+    dataset_validate = dataset_constructor(xs[:, validate_indices], ys[:, validate_indices])
 
-  return dataset_train, dataset_test, dataset_validate
+    return dataset_train, dataset_test, dataset_validate
+
 
 
 
