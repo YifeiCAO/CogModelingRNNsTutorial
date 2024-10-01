@@ -517,7 +517,7 @@ def fit_model(
       dataset_train,
       dataset_test,
       optimizer=optimizer,
-      do_plot=True
+      do_plot=True,
       n_steps=0,
   )
 
