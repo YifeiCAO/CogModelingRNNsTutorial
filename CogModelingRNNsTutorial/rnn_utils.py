@@ -517,6 +517,7 @@ def fit_model(
       dataset_train,
       dataset_test,
       optimizer=optimizer,
+      do_plot=True
       n_steps=0,
   )
 
@@ -539,7 +540,7 @@ def fit_model(
         opt_state=opt_state,
         optimizer=optimizer,
         loss_fun=loss_fun,
-        do_plot=False,
+        do_plot=True,
         n_steps=n_steps_per_call,
     )
     n_calls_to_train_model += 1
