@@ -426,7 +426,7 @@ def plot_session(choices: np.ndarray,
 
   choose_high = choices == 1
   choose_low = choices == 0
-  rewarded = rewards == 1
+  rewarded = rewards > 0.5
 
   y_high = np.max(timeseries) + 0.1
   y_low = np.min(timeseries) - 0.1
