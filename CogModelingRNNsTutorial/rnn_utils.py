@@ -576,6 +576,79 @@ def fit_model(
   else:
     return params, test_loss
 
+def fit_model_maxStep(
+    model_fun,
+    dataset_train,
+    dataset_test,
+    optimizer: Optional = None,
+    loss_fun: str = 'categorical',
+    random_key: Optional = None,
+    n_steps_per_call: int = 500,
+    n_steps_max: int = 2000,
+    return_all_losses=False
+    ):
+  """Fits a model to convergence, by repeatedly calling train_model.
+  
+  Args:
+    model_fun: A function that, when called, returns a Haiku RNN object
+    dataset_train: A DatasetRNN, containing the training data
+    dataset_test: A DatasetRNN, containing the testing data
+    optimizer: The optimizer you'd like to use to train the network
+    loss_fun: string specifying type of loss function (default='categorical')
+    random_key: A jax random key, to be used in initializing the network
+    n_steps_per_call: The number of steps to give to train_model (default=500)
+    n_steps_max: The maximum number of iterations to run (default=2000)
+    return_all_losses: if True, return list of all losses over training.
+  """
+  if random_key is None:
+    random_key = jax.random.PRNGKey(0)
+
+  # Initialize the model
+  params, opt_state, _ = train_model(
+      model_fun,
+      dataset_train,
+      dataset_test,
+      optimizer=optimizer,
+      do_plot=False,
+      n_steps=0,
+  )
+
+  # Train until the maximum number of steps is reached
+  test_loss = np.inf
+  n_calls_to_train_model = 0
+  all_losses = []
+
+  while (n_steps_per_call * n_calls_to_train_model) < n_steps_max:
+    params, opt_state, losses = train_model(
+        model_fun,
+        dataset_train,
+        dataset_test,
+        params=params,
+        opt_state=opt_state,
+        optimizer=optimizer,
+        loss_fun=loss_fun,
+        do_plot=False,
+        n_steps=n_steps_per_call,
+    )
+    n_calls_to_train_model += 1
+    t_start = time.time()
+
+    # Update loss tracking
+    test_loss_new = np.mean(losses['testing_loss'])
+    all_losses += list(losses['testing_loss'])
+
+    print(f"Step {n_steps_per_call * n_calls_to_train_model} of {n_steps_max}; "
+          f"Loss: {test_loss_new:.4e}. (Time: {time.time()-t_start:.1f}s)")
+
+  test_loss = test_loss_new
+  print(f"\nTraining completed. Final test loss: {test_loss:.4e}")
+
+  if return_all_losses:
+    return params, test_loss, all_losses
+  else:
+    return params, test_loss
+
+
 
 def eval_model(
     model_fun: Callable[[], hk.RNNCore],
