@@ -4,7 +4,7 @@ from typing import Optional
 import haiku as hk
 import jax
 import jax.numpy as jnp
-import numpu as np
+import numpy as np
 
 RNNState = jnp.array
 
