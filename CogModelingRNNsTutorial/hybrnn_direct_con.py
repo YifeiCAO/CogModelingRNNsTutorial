@@ -124,7 +124,10 @@ class BiMinusConRNN(hk.RNNCore):
   def _value_rnn(self, state, value, action, reward):
 
     pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
-    value_unchosen = jnp.sum(value * (np.ones(1,2) - action), axis=1)
+    ones_array = np.ones_like(action)  # This creates an array of ones with the same shape and type as 'action'
+
+    # Compute value_unchosen
+    value_unchosen = jnp.sum(value * (ones_array - action), axis=1)
 
     inputs = jnp.concatenate(
         [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
