@@ -8,15 +8,6 @@ import numpy as np
 
 RNNState = jnp.array
 
-def transform_actions(actions):
-    # actions should be a numpy array of shape (n, 2)
-    action_new = np.zeros_like(actions)  # Initialize the new action array with the same shape
-    for i, action in enumerate(actions):
-        if np.array_equal(action, [1, 0]):
-            action_new[i] = [1, -1]
-        elif np.array_equal(action, [0, 1]):
-            action_new[i] = [-1, 1]
-    return action_new
 
 class BiDirConRNN(hk.RNNCore):
   """A hybrid RNN: "habit" processes action choices; "value" processes rewards."""
@@ -133,13 +124,12 @@ class BiMinusConRNN(hk.RNNCore):
   def _value_rnn(self, state, value, action, reward):
 
     pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
-    action_new = transform_actions(action)
-    value_input = value * action_new
+    value_unchosen = jnp.sum(value * (np.ones(1,2) - action), axis=1)
 
     inputs = jnp.concatenate(
         [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
     if self._vo:  # "o" = output -> feed previous output back in
-      inputs = jnp.concatenate([inputs, value_input], axis=-1)
+      inputs = jnp.concatenate([inputs, pre_act_val[:, jnp.newaxis], value_unchosen[:, jnp.newaxis]], axis=-1)
     if self._vs:  # "s" = state -> feed previous hidden state back in
       inputs = jnp.concatenate([inputs, state], axis=-1)
 
