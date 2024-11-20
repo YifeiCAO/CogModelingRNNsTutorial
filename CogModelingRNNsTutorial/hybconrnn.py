@@ -71,7 +71,7 @@ class BiConRNN(hk.RNNCore):
 
     update = hk.Linear(1)(next_state)
     value = (1 - self.forget) * value + self.forget * self.init_value
-    next_value = (np.one([1,2]) - action) * value + (np.ones([1,2]) - action) * update
+    next_value = (np.ones([1,2]) - action) * value + (np.ones([1,2]) - action) * update
 
     return next_value, next_state
 
