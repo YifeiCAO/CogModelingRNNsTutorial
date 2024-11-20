@@ -52,7 +52,7 @@ class BiConRNN(hk.RNNCore):
 
     update = hk.Linear(1)(next_state)
     value = (1 - self.forget) * value + self.forget * self.init_value
-    next_value = action * value + action * update
+    next_value = value + action * update
 
     return next_value, next_state
 
@@ -71,7 +71,7 @@ class BiConRNN(hk.RNNCore):
 
     update = hk.Linear(1)(next_state)
     value = (1 - self.forget) * value + self.forget * self.init_value
-    next_value = (np.ones([1,2]) - action) * value + (np.ones([1,2]) - action) * update
+    next_value = action * value + (np.ones([1,2]) - action) * update
 
     return next_value, next_state
 
@@ -103,7 +103,7 @@ class BiConRNN(hk.RNNCore):
     next_habit, next_h_state = self._habit_rnn(h_state, habit, action_onehot)
 
     # Combine value and habit
-    logits = self.w_v * next_value + self.w_h * next_habit + self.w_c * next_c_value  # (bs, n_a)
+    logits = self.w_v * next_value * action_onehot + self.w_h * next_habit + self.w_c * next_c_value * (np.ones([1,2])-action_onehot)  # (bs, n_a)
 
     return logits, (next_h_state, next_v_state, next_c_state, next_habit, next_value, next_c_value)
 
