@@ -680,6 +680,53 @@ class Hk_PreserveAgentQ(hk.RNNCore):
     values = self._q_init * jnp.ones([batch_size, 2])  # shape: (batch_size, n_actions)
     return values
 
+class Hk_ConAgentQ(hk.RNNCore):
+  """Vanilla Q-Learning model, expressed in Haiku.
+
+  Updates value of chosen action using a delta rule with step-size param alpha. 
+  Does not update value of the unchosen action.
+  Selects actions using a softmax decision rule with parameter Beta.
+  """
+
+  def __init__(self, n_cs=4):
+    super(Hk_ConAgentQ, self).__init__()
+
+    # Haiku parameters
+    alpha_unsigmoid = hk.get_parameter(
+        'alpha_unsigmoid', (1,),
+        init=hk.initializers.RandomUniform(minval=-1, maxval=1),
+    )
+    beta = hk.get_parameter(
+        'beta', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=2)
+    )
+
+    # Local parameters
+    self.alpha = jax.nn.sigmoid(alpha_unsigmoid)
+    self.beta = beta
+    self._q_init = 0.5
+
+  def __call__(self, inputs: jnp.array, prev_state: jnp.array):
+    prev_qs = prev_state
+
+    choice = inputs[:, 0]  # shape: (batch_size, 1)
+    reward = inputs[:, 1]  # shape: (batch_size, 1)
+
+    choice_onehot = jax.nn.one_hot(choice, num_classes=2)  # shape: (batch_size, 2)
+    chosen_value = jnp.sum(prev_qs * choice_onehot, axis=1)  # shape: (batch_size)
+    unchosen_value = jnp.sum(prev_qs * (np.ones([1,2]) - choice_onehot), axis=1)
+    deltas = reward - chosen_value  # shape: (batch_size)
+    deltas_con = (1 - reward) - unchosen_value
+    new_qs = prev_qs + self.alpha * choice_onehot * jnp.expand_dims(deltas, -1) + self.alpha * (np.ones([1,2]) - choice_onehot) * jnp.expand_dims(deltas_con, -1)
+    
+    # Compute output logits
+    choice_logits = self.beta * new_qs
+
+    return choice_logits, new_qs
+
+  def initial_state(self, batch_size):
+    values = self._q_init * jnp.ones([batch_size, 2])  # shape: (batch_size, n_actions)
+    return values
+
 class Hk_PreserveConAgentQ(hk.RNNCore):
   """Vanilla Q-Learning model, expressed in Haiku.
 
