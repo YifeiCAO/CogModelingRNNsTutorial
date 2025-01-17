@@ -736,7 +736,7 @@ class Hk_ConUnequalAgentQ(hk.RNNCore):
   """
 
   def __init__(self, n_cs=4):
-    super(Hk_ConAgentQ, self).__init__()
+    super(Hk_ConUnequalAgentQ, self).__init__()
 
     # Haiku parameters
     alpha_unsigmoid = hk.get_parameter(
@@ -843,7 +843,7 @@ class Hk_PreserveConUnequalAgentQ(hk.RNNCore):
   """
 
   def __init__(self, n_cs=4):
-    super(Hk_PreserveConAgentQ, self).__init__()
+    super(Hk_PreserveConUnequalAgentQ, self).__init__()
 
     # Haiku parameters
     alpha_unsigmoid = hk.get_parameter(
