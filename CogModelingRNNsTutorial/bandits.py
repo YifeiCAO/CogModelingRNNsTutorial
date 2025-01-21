@@ -984,7 +984,7 @@ class Hk_MariaAgentQ(hk.RNNCore):
   """
 
   def __init__(self, n_cs=4):
-    super(Hk_ForgetAgentQ, self).__init__()
+    super(Hk_MariaAgentQ, self).__init__()
 
     # Haiku parameters
     alpha_unsigmoid = hk.get_parameter(
