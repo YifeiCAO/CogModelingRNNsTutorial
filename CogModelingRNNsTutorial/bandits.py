@@ -992,7 +992,7 @@ class Hk_MariaAgentQ(hk.RNNCore):
         init=hk.initializers.RandomUniform(minval=-1, maxval=1),
     )
     beta = hk.get_parameter(
-        'beta', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=1e6)
+        'beta', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=50)
     )
     forget = hk.get_parameter(
         'forget', (1,), init=hk.initializers.RandomUniform(minval=-1, maxval=1)
