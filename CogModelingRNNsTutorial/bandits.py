@@ -627,6 +627,77 @@ class HkAgentQ(hk.RNNCore):
     values = self._q_init * jnp.ones([batch_size, 2])  # shape: (batch_size, n_actions)
     return values
 
+import haiku as hk
+import jax.numpy as jnp
+
+class HkKalmanAgent(hk.RNNCore):
+    """
+    Kalman Filter-based agent.
+    Updates posterior values of chosen and unchosen actions according to Kalman filter.
+    Uses a softmax decision rule with temperature parameter tau for action selection.
+    """
+
+    def __init__(self, scaling_param=0.0163, baseline=0.5):
+        super(HkKalmanAgent, self).__init__()
+        # Scaling parameter vs and baseline value for unchosen option
+        self.scaling_param = scaling_param
+        self.baseline = baseline
+
+        # Parameters
+        self.tau = hk.get_parameter(
+            'tau', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=2)
+        )
+        self.alpha = hk.get_parameter(
+            'alpha', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=1)
+        )
+        self.delta = hk.get_parameter(
+            'delta', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=0.1)
+        )
+
+    def __call__(self, inputs: jnp.array, prev_state: jnp.array):
+        # Inputs and previous state
+        choice = inputs[:, 0]  # Chosen action (0 or 1)
+        reward = inputs[:, 1]  # Reward (scaled between 0 and 1)
+        prev_values, prev_variances = prev_state  # Posterior values and variances
+
+        # Compute Kalman gain for chosen option
+        chosen_variance = prev_variances[:, 0]
+        kalman_gain = chosen_variance / (chosen_variance + self.scaling_param)
+
+        # Update chosen value
+        chosen_value = prev_values[:, 0]
+        prediction_error = reward - chosen_value
+        updated_chosen_value = chosen_value + kalman_gain * prediction_error
+
+        # Update variance for chosen option
+        updated_chosen_variance = (1 - kalman_gain) * chosen_variance
+
+        # Update unchosen value with decay towards baseline
+        unchosen_value = prev_values[:, 1]
+        updated_unchosen_value = unchosen_value + self.delta * (self.baseline - unchosen_value)
+
+        # Update variance for unchosen option
+        unchosen_variance = prev_variances[:, 1]
+        updated_unchosen_variance = unchosen_variance + self.alpha
+
+        # Combine updated values and variances
+        updated_values = jnp.stack([updated_chosen_value, updated_unchosen_value], axis=1)
+        updated_variances = jnp.stack([updated_chosen_variance, updated_unchosen_variance], axis=1)
+
+        # Compute choice probabilities using softmax
+        logits = updated_values / self.tau
+        choice_probs = jax.nn.softmax(logits, axis=1)
+
+        # Return choice probabilities and updated state
+        return choice_probs, (updated_values, updated_variances)
+
+    def initial_state(self, batch_size):
+        # Initialize values and variances
+        init_values = self.baseline * jnp.ones([batch_size, 2])  # Values for both options
+        init_variances = 0.0214 * jnp.ones([batch_size, 2])  # Initial variances
+        return init_values, init_variances
+
+
 class Hk_PreserveAgentQ(hk.RNNCore):
   """Vanilla Q-Learning model, expressed in Haiku.
 
