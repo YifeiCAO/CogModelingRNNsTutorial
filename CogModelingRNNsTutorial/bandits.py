@@ -630,9 +630,13 @@ class HkAgentQ(hk.RNNCore):
 import haiku as hk
 import jax.numpy as jnp
 
+import haiku as hk
+import jax
+import jax.numpy as jnp
+
 class HkKalmanAgent(hk.RNNCore):
     """
-    Kalman Filter-based agent.
+    Kalman Filter-based agent with random noise.
     Updates posterior values of chosen and unchosen actions according to Kalman filter.
     Uses a softmax decision rule with temperature parameter tau for action selection.
     """
@@ -653,6 +657,9 @@ class HkKalmanAgent(hk.RNNCore):
         self.delta = hk.get_parameter(
             'delta', (1,), init=hk.initializers.RandomUniform(minval=0, maxval=0.1)
         )
+        self.sigma = hk.get_parameter(
+            'sigma', (1,), init=hk.initializers.RandomUniform(minval=0.01, maxval=0.1)
+        )  # Noise standard deviation
 
     def __call__(self, inputs: jnp.array, prev_state: jnp.array):
         # Inputs and previous state
@@ -667,7 +674,8 @@ class HkKalmanAgent(hk.RNNCore):
         # Update chosen value
         chosen_value = prev_values[:, 0]
         prediction_error = reward - chosen_value
-        updated_chosen_value = chosen_value + kalman_gain * prediction_error
+        noise = jax.random.normal(hk.next_rng_key(), shape=prediction_error.shape) * self.sigma
+        updated_chosen_value = chosen_value + kalman_gain * prediction_error + noise
 
         # Update variance for chosen option
         updated_chosen_variance = (1 - kalman_gain) * chosen_variance
@@ -696,6 +704,7 @@ class HkKalmanAgent(hk.RNNCore):
         init_values = self.baseline * jnp.ones([batch_size, 2])  # Values for both options
         init_variances = 0.0214 * jnp.ones([batch_size, 2])  # Initial variances
         return init_values, init_variances
+
 
 
 class Hk_PreserveAgentQ(hk.RNNCore):
