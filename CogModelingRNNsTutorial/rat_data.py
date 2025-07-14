@@ -53,39 +53,51 @@ def load_data_for_one_rat(fname=None, data_dir=DATA_DIR):
 
 import numpy as np  # 确保导入了numpy
 
-def format_into_datasets(xs, ys, dataset_constructor, n_train_sessions, n_test_sessions, n_validate_sessions):
-    """Format inputs xs and outputs ys into dataset.
+import numpy as np
+
+def format_into_datasets(xs, ys, dataset_constructor, n_train_sessions, n_test_sessions, n_validate_sessions, random_seed=None):
+    """
+    Format inputs xs and outputs ys into randomly split datasets with optional reproducibility.
 
     Args:
         xs: n_trials x n_sessions x 2 array of choices and rewards
         ys: n_trials x n_sessions x 1 array of next choice. choice value of -1 denotes
-          instructed trial or padding at end of session.
+            instructed trial or padding at end of session.
         dataset_constructor: constructor that accepts xs and ys as arguments; probably
-          use rnn_utils.DatasetRNN
+            use rnn_utils.DatasetRNN
         n_train_sessions: number of sessions for the training dataset
         n_test_sessions: number of sessions for the test dataset
         n_validate_sessions: number of sessions for the validation dataset
+        random_seed: optional int, for reproducible random splits
 
     Returns:
-        dataset_train: a dataset containing specified number of training sessions
-        dataset_test: a dataset containing specified number of test sessions
-        dataset_validate: a dataset containing specified number of validation sessions
+        dataset_train: a dataset containing randomly selected training sessions
+        dataset_test: a dataset containing randomly selected test sessions
+        dataset_validate: a dataset containing randomly selected validation sessions
     """
-    # Ensure the input data has enough sessions
     total_sessions = xs.shape[1]
-    assert total_sessions >= (n_train_sessions + n_test_sessions + n_validate_sessions), \
-        "Input data does not have enough sessions for the specified splits."
+    total_needed = n_train_sessions + n_test_sessions + n_validate_sessions
 
-    # Split the data into train, test, and validate datasets
-    train_indices = np.arange(n_train_sessions)
-    test_indices = np.arange(n_train_sessions, n_train_sessions + n_test_sessions)
-    validate_indices = np.arange(total_sessions - n_validate_sessions, total_sessions)
+    assert total_sessions >= total_needed, \
+        f"Not enough sessions: required {total_needed}, but got {total_sessions}."
+
+    # Set random seed if provided
+    if random_seed is not None:
+        np.random.seed(random_seed)
+
+    # Randomly shuffle session indices
+    shuffled_indices = np.random.permutation(total_sessions)
+
+    train_indices = shuffled_indices[:n_train_sessions]
+    validate_indices = shuffled_indices[n_train_sessions:n_train_sessions + n_validate_sessions]
+    test_indices = shuffled_indices[n_train_sessions + n_validate_sessions:total_needed]
 
     dataset_train = dataset_constructor(xs[:, train_indices], ys[:, train_indices])
-    dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
     dataset_validate = dataset_constructor(xs[:, validate_indices], ys[:, validate_indices])
+    dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
 
     return dataset_train, dataset_test, dataset_validate
+
 
 
 
