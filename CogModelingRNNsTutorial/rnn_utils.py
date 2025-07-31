@@ -27,84 +27,85 @@ def find_session_end(x):
   return trial_end
 
 
-class DatasetRNN():
-  """Holds a dataset for training an RNN, consisting of inputs and targets.
+class DatasetRNN:
+    """Holds a dataset for training an RNN, consisting of inputs and targets.
+    Supports optional padding or dropping of the last incomplete batch when
+    `n_episodes % batch_size != 0`.
 
-     Both inputs and targets are stored as [timestep, episode, feature]
-     Serves them up in batches
-  """
-
-  def __init__(self,
-               xs: np.ndarray,
-               ys: np.ndarray,
-               batch_size: Optional[int] = None):
-    """Do error checking and bin up the dataset into batches.
-
-    Args:
-      xs: Values to become inputs to the network.
-        Should have dimensionality [timestep, episode, feature]
-      ys: Values to become output targets for the RNN.
-        Should have dimensionality [timestep, episode, feature]
-      batch_size: The size of the batch (number of episodes) to serve up each
-        time next() is called. If not specified, all episodes in the dataset 
-        will be served
+    Attributes:
+      _xs: ndarray of shape [timesteps, episodes, features]
+      _ys: ndarray of shape [timesteps, episodes, features]
+      _batch_size: int, number of episodes per batch
+      _dataset_size: int, total episodes after padding/dropping
+      n_batches: int, number of full batches in the dataset
     """
 
-    if batch_size is None:
-      batch_size = xs.shape[1]
+    def __init__(self,
+                 xs: np.ndarray,
+                 ys: np.ndarray,
+                 batch_size: Optional[int] = None,
+                 drop_last: bool = True,
+                 pad_value: float = -1.0):
+        """
+        Args:
+          xs: Input array, shape [timesteps, episodes, features]
+          ys: Target array, shape [timesteps, episodes, features]
+          batch_size: Episodes per batch; defaults to all episodes.
+          drop_last: If True, discard the final incomplete batch.
+                     If False, pad the final batch up to `batch_size`.
+          pad_value: Value to use when padding `ys` (negative labels get masked).
+        """
+        # Default batch_size to all episodes
+        timesteps, n_eps, _ = xs.shape
+        if batch_size is None:
+            batch_size = n_eps
 
-    # Error checking
-    # Do xs and ys have the same number of timesteps?
-    if xs.shape[0] != ys.shape[0]:
-      msg = ('number of timesteps in xs {} must be equal to number of timesteps'
-             ' in ys {}.')
-      raise ValueError(msg.format(xs.shape[0], ys.shape[0]))
+        # Determine remainder
+        rem = n_eps % batch_size
+        if rem != 0:
+            if drop_last:
+                # Drop last rem episodes
+                xs = xs[:, :-rem]
+                ys = ys[:, :-rem]
+            else:
+                # Pad to make divisible
+                pad_eps = batch_size - rem
+                # Pad xs with zeros
+                pad_x = np.zeros((timesteps, pad_eps, xs.shape[2]), dtype=xs.dtype)
+                # Pad ys with pad_value (labels < 0 will be masked)
+                pad_y = pad_value * np.ones((timesteps, pad_eps, ys.shape[2]), dtype=ys.dtype)
+                xs = np.concatenate([xs, pad_x], axis=1)
+                ys = np.concatenate([ys, pad_y], axis=1)
 
-    # Do xs and ys have the same number of episodes?
-    if xs.shape[1] != ys.shape[1]:
-      msg = ('number of timesteps in xs {} must be equal to number of timesteps'
-             ' in ys {}.')
-      raise ValueError(msg.format(xs.shape[0], ys.shape[0]))
+        # Final dataset size check
+        n_eps_new = xs.shape[1]
+        if n_eps_new % batch_size != 0:
+            raise ValueError(f"After drop/pad, number of episodes {n_eps_new} not divisible by batch_size {batch_size}.")
 
-    # Is the number of episodes divisible by the batch size?
-    if xs.shape[1] % batch_size != 0:
-      msg = 'dataset size {} must be divisible by batch_size {}.'
-      raise ValueError(msg.format(xs.shape[1], batch_size))
+        # Save properties
+        self._xs = xs
+        self._ys = ys
+        self._batch_size = batch_size
+        self._dataset_size = n_eps_new
+        self._idx = 0
+        self.n_batches = n_eps_new // batch_size
 
-    # Property setting
-    self._xs = xs
-    self._ys = ys
-    self._batch_size = batch_size
-    self._dataset_size = self._xs.shape[1]
-    self._idx = 0
-    self.n_batches = self._dataset_size // self._batch_size
+    def __iter__(self):
+        return self
 
-  def __iter__(self):
-    return self
-
-  def __next__(self) -> Tuple[chex.Array, chex.Array]:
-    """Return a batch of data, including both xs and ys.
-    
-    Returns:
-      x, y: next input (x) and target (y) in sequence.
-    """
-
-    # Define the chunk we want: from idx to idx + batch_size
-    start = self._idx
-    end = start + self._batch_size
-    # Check that we're not trying to overshoot the size of the dataset
-    assert end <= self._dataset_size
-
-    # Update the index for next time
-    if end == self._dataset_size:
-      self._idx = 0
-    else:
-      self._idx = end
-
-    # Get the chunks of data
-    x, y = self._xs[:, start:end], self._ys[:, start:end]
-
-    return x, y
+    def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
+        """Return the next batch of data."""
+        start = self._idx
+        end = start + self._batch_size
+        if end > self._dataset_size:
+            # Reset for next epoch
+            self._idx = 0
+            raise StopIteration
+        # Prepare next index
+        self._idx = end if end < self._dataset_size else 0
+        x_batch = self._xs[:, start:end]
+        y_batch = self._ys[:, start:end]
+        return x_batch, y_batch
 
 
 def nan_in_dict(d):

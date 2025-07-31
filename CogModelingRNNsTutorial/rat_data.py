@@ -55,50 +55,160 @@ import numpy as np  # 确保导入了numpy
 
 import numpy as np
 
-def format_into_datasets(xs, ys, dataset_constructor, n_train_sessions, n_test_sessions, n_validate_sessions, random_seed=None):
+# def format_into_datasets(xs, ys, dataset_constructor, n_train_sessions, n_test_sessions, n_validate_sessions, random_seed=None):
+#     """
+#     Format inputs xs and outputs ys into randomly split datasets with optional reproducibility.
+
+#     Args:
+#         xs: n_trials x n_sessions x 2 array of choices and rewards
+#         ys: n_trials x n_sessions x 1 array of next choice. choice value of -1 denotes
+#             instructed trial or padding at end of session.
+#         dataset_constructor: constructor that accepts xs and ys as arguments; probably
+#             use rnn_utils.DatasetRNN
+#         n_train_sessions: number of sessions for the training dataset
+#         n_test_sessions: number of sessions for the test dataset
+#         n_validate_sessions: number of sessions for the validation dataset
+#         random_seed: optional int, for reproducible random splits
+
+#     Returns:
+#         dataset_train: a dataset containing randomly selected training sessions
+#         dataset_test: a dataset containing randomly selected test sessions
+#         dataset_validate: a dataset containing randomly selected validation sessions
+#     """
+#     total_sessions = xs.shape[1]
+#     total_needed = n_train_sessions + n_test_sessions + n_validate_sessions
+
+#     assert total_sessions >= total_needed, \
+#         f"Not enough sessions: required {total_needed}, but got {total_sessions}."
+
+#     # Set random seed if provided
+#     if random_seed is not None:
+#         np.random.seed(random_seed)
+
+#     # Randomly shuffle session indices
+#     shuffled_indices = np.random.permutation(total_sessions)
+
+#     train_indices = shuffled_indices[:n_train_sessions]
+#     validate_indices = shuffled_indices[n_train_sessions:n_train_sessions + n_validate_sessions]
+#     test_indices = shuffled_indices[n_train_sessions + n_validate_sessions:total_needed]
+
+#     dataset_train = dataset_constructor(xs[:, train_indices], ys[:, train_indices])
+#     dataset_validate = dataset_constructor(xs[:, validate_indices], ys[:, validate_indices])
+#     dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
+
+#     return dataset_train, dataset_test, dataset_validate
+
+
+# with batch size
+def format_into_datasets(xs,
+                         ys,
+                         dataset_constructor,
+                         n_train_sessions,
+                         n_test_sessions,
+                         n_validate_sessions,
+                         batch_size=None,
+                         random_seed=None):
     """
     Format inputs xs and outputs ys into randomly split datasets with optional reproducibility.
 
     Args:
-        xs: n_trials x n_sessions x 2 array of choices and rewards
-        ys: n_trials x n_sessions x 1 array of next choice. choice value of -1 denotes
-            instructed trial or padding at end of session.
-        dataset_constructor: constructor that accepts xs and ys as arguments; probably
-            use rnn_utils.DatasetRNN
+        xs: n_trials x n_sessions x … array of inputs
+        ys: n_trials x n_sessions x … array of targets
+        dataset_constructor: constructor that accepts (xs, ys, batch_size)
         n_train_sessions: number of sessions for the training dataset
         n_test_sessions: number of sessions for the test dataset
         n_validate_sessions: number of sessions for the validation dataset
+        batch_size: number of episodes per batch (passed to DatasetRNN)
         random_seed: optional int, for reproducible random splits
 
     Returns:
-        dataset_train: a dataset containing randomly selected training sessions
-        dataset_test: a dataset containing randomly selected test sessions
-        dataset_validate: a dataset containing randomly selected validation sessions
+        dataset_train, dataset_test, dataset_validate
     """
     total_sessions = xs.shape[1]
     total_needed = n_train_sessions + n_test_sessions + n_validate_sessions
-
     assert total_sessions >= total_needed, \
         f"Not enough sessions: required {total_needed}, but got {total_sessions}."
 
-    # Set random seed if provided
+    # reproducible shuffle
     if random_seed is not None:
         np.random.seed(random_seed)
+    shuffled = np.random.permutation(total_sessions)
 
-    # Randomly shuffle session indices
-    shuffled_indices = np.random.permutation(total_sessions)
+    train_idx = shuffled[:n_train_sessions]
+    val_idx   = shuffled[n_train_sessions:n_train_sessions + n_validate_sessions]
+    test_idx  = shuffled[n_train_sessions + n_validate_sessions:total_needed]
 
-    train_indices = shuffled_indices[:n_train_sessions]
-    validate_indices = shuffled_indices[n_train_sessions:n_train_sessions + n_validate_sessions]
-    test_indices = shuffled_indices[n_train_sessions + n_validate_sessions:total_needed]
+    # 传入 batch_size
+    ds_train = dataset_constructor(xs[:, train_idx],
+                                   ys[:, train_idx],
+                                   batch_size=batch_size)
+    ds_val   = dataset_constructor(xs[:, val_idx],
+                                   ys[:, val_idx],
+                                   batch_size=batch_size)
+    ds_test  = dataset_constructor(xs[:, test_idx],
+                                   ys[:, test_idx],
+                                   batch_size=batch_size)
 
-    dataset_train = dataset_constructor(xs[:, train_indices], ys[:, train_indices])
-    dataset_validate = dataset_constructor(xs[:, validate_indices], ys[:, validate_indices])
-    dataset_test = dataset_constructor(xs[:, test_indices], ys[:, test_indices])
-
-    return dataset_train, dataset_test, dataset_validate
+    return ds_train, ds_test, ds_val
 
 
+
+def format_into_datasets_10(xs,
+                            ys,
+                            dataset_constructor,
+                            n_validate_sessions,
+                            batch_size=None,
+                            random_seed=None):
+    """
+    10-fold cross‐validation 数据切分，每次：
+      - 随机打乱所有 sessions（可固定 random_seed）
+      - 平均分成 10 份 folds
+      - 每次循环：
+          test = 当前 fold
+          剩余 sessions 中前 n_validate_sessions 做 validation
+          剩下的做 train
+      - batch_size 会透传给 dataset_constructor
+
+    Args:
+        xs: np.ndarray, shape (n_trials, n_sessions, …)
+        ys: np.ndarray, shape (n_trials, n_sessions, …)
+        dataset_constructor: 接受 (xs_subset, ys_subset, batch_size) 的构造器
+        n_validate_sessions: 每个 fold 中 validation sessions 数量
+        batch_size: mini‐batch 大小（episodes）；None 则每个数据集用全部 episodes
+        random_seed: int，可选；用于可复现的 shuffle
+
+    Returns:
+        List of 10 tuples (train_ds, validate_ds, test_ds)
+    """
+    total_sessions = xs.shape[1]
+    # 可复现地打乱
+    if random_seed is not None:
+        np.random.seed(random_seed)
+    all_idx = np.random.permutation(total_sessions)
+
+    # 平均分成 10 份，即使不能整除也会自动前几份多一个
+    folds = np.array_split(all_idx, 10)
+
+    folds_datasets = []
+    for i in range(10):
+        # 选出第 i fold 作为测试集
+        test_idx = folds[i]
+        # 剩余所有 idx
+        remaining = np.hstack([folds[j] for j in range(10) if j != i])
+        if len(remaining) < n_validate_sessions:
+            raise ValueError(f"剩余 sessions ({len(remaining)}) 少于 n_validate_sessions ({n_validate_sessions})")
+
+        # 前 n_validate_sessions 做验证，其余做训练
+        val_idx = remaining[:n_validate_sessions]
+        train_idx = remaining[n_validate_sessions:]
+
+        ds_train = dataset_constructor(xs[:, train_idx], ys[:, train_idx], batch_size=batch_size)
+        ds_val   = dataset_constructor(xs[:, val_idx],   ys[:, val_idx],   batch_size=batch_size)
+        ds_test  = dataset_constructor(xs[:, test_idx],  ys[:, test_idx],  batch_size=batch_size)
+
+        folds_datasets.append((ds_train, ds_val, ds_test))
+
+    return folds_datasets
 
 
 
