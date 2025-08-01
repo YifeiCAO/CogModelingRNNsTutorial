@@ -44,7 +44,7 @@ class DatasetRNN:
                  xs: np.ndarray,
                  ys: np.ndarray,
                  batch_size: Optional[int] = None,
-                 drop_last: bool = True,
+                 drop_last: bool = False,
                  pad_value: float = -1.0):
         """
         Args:
@@ -94,17 +94,26 @@ class DatasetRNN:
         return self
 
     def __next__(self) -> Tuple[np.ndarray, np.ndarray]:
-        """Return the next batch of data."""
+        """Return the next batch of data, infinitely cycling."""
         start = self._idx
         end = start + self._batch_size
+
+        # 如果超出，就从头开始取
         if end > self._dataset_size:
-            # Reset for next epoch
-            self._idx = 0
-            raise StopIteration
-        # Prepare next index
-        self._idx = end if end < self._dataset_size else 0
-        x_batch = self._xs[:, start:end]
-        y_batch = self._ys[:, start:end]
+            # 先取到末尾
+            x_batch = self._xs[:, start:self._dataset_size]
+            y_batch = self._ys[:, start:self._dataset_size]
+            # 然后继续从头取剩余的部分
+            need = end - self._dataset_size
+            x_batch = np.concatenate([x_batch, self._xs[:, 0:need]], axis=1)
+            y_batch = np.concatenate([y_batch, self._ys[:, 0:need]], axis=1)
+            # 更新索引到环形位置
+            self._idx = need
+        else:
+            x_batch = self._xs[:, start:end]
+            y_batch = self._ys[:, start:end]
+            self._idx = end
+
         return x_batch, y_batch
 
 
