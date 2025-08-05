@@ -502,6 +502,7 @@ def fit_model(
     n_steps_max: int = 2000,
     return_all_losses=False,
     early_stop_step: int = 200,  # 用于控制检查的步数
+    if_early_stop=False
     ):
   """Fits a model to convergence, by repeatedly calling train_model.
   
@@ -537,9 +538,11 @@ def fit_model(
   test_loss = np.inf
   n_calls_to_train_model = 0
   all_losses = []
+  min_loss, best_params = float('inf'), None
 
-  first_loss = None
-  early_stop_triggered = False
+  if if_early_stop:
+    first_loss = None
+    early_stop_triggered = False
   
   while continue_training:
     params, opt_state, losses = train_model(
@@ -566,12 +569,18 @@ def fit_model(
 #         first_loss = test_loss_new
     
     # 检查第 early_stop_step 步与第 1 步的损失
-    if (n_calls_to_train_model * n_steps_per_call) % early_stop_step == 0:
+    if if_early_stop  and ((n_calls_to_train_model * n_steps_per_call) % early_stop_step == 0):
         if test_loss_new >= first_loss:
             print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
             early_stop_triggered = True
             continue_training = False
             break
+
+    # 选取和保存best_model, min_loss
+    if test_loss_new < min_loss:
+        min_loss = test_loss_new
+        best_params = params
+        print('updating best model ..')
 
     # 检查是否达到最大迭代次数
     if (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
@@ -582,9 +591,9 @@ def fit_model(
           f"Loss: {test_loss_new:.4e}. (Time: {time.time()-t_start:.1f}s)")
 
   if return_all_losses:
-    return params, test_loss, all_losses
+    return best_params, min_loss, all_losses
   else:
-    return params, test_loss
+    return best_params, min_loss
 
 def fit_model_maxStep(
     model_fun,
