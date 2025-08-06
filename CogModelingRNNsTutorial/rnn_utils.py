@@ -561,7 +561,7 @@ def fit_model(
     
     # first_loss = np.mean(losses['testing_loss'][:50])
 
-    test_loss_new = np.mean(losses['testing_loss'])
+    test_loss_new = np.mean(losses['testing_loss'][:50])
     all_losses += list(losses['testing_loss'])
 
     # 在第一个n_steps_per_call步骤后记录第一个损失
