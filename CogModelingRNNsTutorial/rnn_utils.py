@@ -297,6 +297,8 @@ def train_model(
       'testing_loss': np.array(testing_loss),
   }
 
+  print('/nThe mean of testing losses in one call:', np.mean(testing_loss))
+
   # Check if anything has become NaN that should not be NaN
   if nan_in_dict(params):
     print(params)
