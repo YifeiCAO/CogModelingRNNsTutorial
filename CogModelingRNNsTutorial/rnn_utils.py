@@ -563,6 +563,7 @@ def fit_model(
 
     test_loss_new = np.mean(losses['testing_loss'][-50:])
     all_losses += list(losses['testing_loss'])
+    print('Comparing two losses for early stop: first loss', first_loss, 'test_loss_new', test_loss_new)
 
     # 在第一个n_steps_per_call步骤后记录第一个损失
 #     if first_loss is None:
