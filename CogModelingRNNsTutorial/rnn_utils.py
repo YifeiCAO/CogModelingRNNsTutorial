@@ -541,7 +541,7 @@ def fit_model(
   min_loss, best_params = float('inf'), None
 
   if if_early_stop:
-    first_loss = np.inf
+    first_loss = float('inf')
     early_stop_triggered = False
   
   while continue_training:
