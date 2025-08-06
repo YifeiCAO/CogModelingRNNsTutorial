@@ -541,7 +541,7 @@ def fit_model(
   min_loss, best_params = float('inf'), None
 
   if if_early_stop:
-    first_loss = None
+    first_loss = np.inf
     early_stop_triggered = False
   
   while continue_training:
@@ -559,11 +559,10 @@ def fit_model(
     n_calls_to_train_model += 1
     t_start = time.time()
     
-    first_loss = np.mean(losses['testing_loss'][:50])
+    # first_loss = np.mean(losses['testing_loss'][:50])
 
-    test_loss_new = np.mean(losses['testing_loss'][-50:])
+    test_loss_new = np.mean(losses['testing_loss'])
     all_losses += list(losses['testing_loss'])
-    print('Comparing two losses for early stop: first loss', first_loss, 'test_loss_new', test_loss_new)
 
     # 在第一个n_steps_per_call步骤后记录第一个损失
 #     if first_loss is None:
@@ -576,6 +575,7 @@ def fit_model(
             early_stop_triggered = True
             continue_training = False
             break
+    first_loss = test_loss_new
 
     # 选取和保存best_model, min_loss
     if test_loss_new < min_loss:
