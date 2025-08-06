@@ -571,18 +571,18 @@ def fit_model(
     # 检查第 early_stop_step 步与第 1 步的损失
     if if_early_stop  and ((n_calls_to_train_model * n_steps_per_call) % early_stop_step == 0):
       print('\nfirst loss:', first_loss, 'test loss new:', test_loss_new)
-        if test_loss_new >= first_loss:
-            print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
-            early_stop_triggered = True
-            continue_training = False
-            break
+      if test_loss_new >= first_loss:
+        print(f"\nStopping early as the loss at step {early_stop_step} did not improve over step 1.")
+        early_stop_triggered = True
+        continue_training = False
+        break
     first_loss = test_loss_new
 
     # 选取和保存best_model, min_loss
     if test_loss_new < min_loss:
-        min_loss = test_loss_new
-        best_params = params
-        print('updating best model ..')
+      min_loss = test_loss_new
+      best_params = params
+      print('updating best model ..')
 
     # 检查是否达到最大迭代次数
     if (n_steps_per_call * n_calls_to_train_model) >= n_steps_max:
