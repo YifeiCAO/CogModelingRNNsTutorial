@@ -594,6 +594,9 @@ def fit_model(
     print(f"Step {n_steps_per_call * n_calls_to_train_model} of {n_steps_max}; "
           f"Loss: {test_loss_new:.4e}. (Time: {time.time()-t_start:.1f}s)")
 
+  if dataset_test is None:
+    best_params = params
+
   if return_all_losses:
     return best_params, min_loss, all_losses, best_steps
   else:
