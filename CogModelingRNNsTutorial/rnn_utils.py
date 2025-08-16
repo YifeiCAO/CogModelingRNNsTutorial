@@ -268,22 +268,23 @@ def train_model(
     training_loss.append(float(loss))
 
     # Compute testing loss
-    xs_test, ys_test = next(dataset_test)
-    if (truncate_seq_length is not None) and (truncate_seq_length < xs_test.shape[0]):
-      xs_test = xs_test[:truncate_seq_length]
-      ys_test = ys_test[:truncate_seq_length]
+    if dataset_test is not None:
+      xs_test, ys_test = next(dataset_test)
+      if (truncate_seq_length is not None) and (truncate_seq_length < xs_test.shape[0]):
+        xs_test = xs_test[:truncate_seq_length]
+        ys_test = ys_test[:truncate_seq_length]
 
-    test_loss = compute_loss(params, xs_test, ys_test, key_i)
-    testing_loss.append(float(test_loss))
+      test_loss = compute_loss(params, xs_test, ys_test, key_i)
+      testing_loss.append(float(test_loss))
 
-    # Log every 10th step
-    if step % 10 == 9:
-      print((f'\rStep {step + 1} of {n_steps}; '
-             f'Loss: {loss:.4e}; Test Loss: {test_loss:.4e}. '
-             f'(Time: {time.time()-t_start:.1f}s)'), end='')
+      # Log every 10th step
+      if step % 10 == 9:
+        print((f'\rStep {step + 1} of {n_steps}; '
+               f'Loss: {loss:.4e}; Test Loss: {test_loss:.4e}. '
+               f'(Time: {time.time()-t_start:.1f}s)'), end='')
 
   # If we actually did any training, print final loss and make a nice plot
-  if n_steps > 1 and do_plot:
+  if n_steps > 1 and do_plot and dataset_test is not None:
     plt.figure()
     plt.semilogy(training_loss, color='black', label='Training Loss')
     plt.semilogy(testing_loss, color='red', label='Testing Loss')
