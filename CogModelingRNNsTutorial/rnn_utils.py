@@ -593,9 +593,9 @@ def fit_model(
           f"Loss: {test_loss_new:.4e}. (Time: {time.time()-t_start:.1f}s)")
 
   if return_all_losses:
-    return best_params, min_loss, all_losses
+    return best_params, min_loss, all_losses, n_steps_per_call * n_calls_to_train_model
   else:
-    return best_params, min_loss
+    return best_params, min_loss, n_steps_per_call * n_calls_to_train_model
 
 def fit_model_maxStep(
     model_fun,
