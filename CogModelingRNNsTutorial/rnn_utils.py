@@ -538,7 +538,7 @@ def fit_model(
   test_loss = np.inf
   n_calls_to_train_model = 0
   all_losses = []
-  min_loss, best_params = float('inf'), None
+  min_loss, best_params, best_steps = float('inf'), None, None
 
   if if_early_stop:
     first_loss = float('inf')
@@ -582,6 +582,7 @@ def fit_model(
     if test_loss_new < min_loss:
       min_loss = test_loss_new
       best_params = params
+      best_steps = n_steps_per_call * n_calls_to_train_model
       print('updating best model ..')
 
     # 检查是否达到最大迭代次数
@@ -593,9 +594,9 @@ def fit_model(
           f"Loss: {test_loss_new:.4e}. (Time: {time.time()-t_start:.1f}s)")
 
   if return_all_losses:
-    return best_params, min_loss, all_losses, n_steps_per_call * n_calls_to_train_model
+    return best_params, min_loss, all_losses, best_steps
   else:
-    return best_params, min_loss, n_steps_per_call * n_calls_to_train_model
+    return best_params, min_loss, best_steps
 
 def fit_model_maxStep(
     model_fun,
