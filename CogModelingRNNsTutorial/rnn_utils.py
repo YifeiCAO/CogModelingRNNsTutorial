@@ -509,7 +509,8 @@ def fit_model(
     n_steps_max: int = 2000,
     return_all_losses=False,
     early_stop_step: int = 200,  # 用于控制检查的步数
-    if_early_stop=False
+    if_early_stop=False,
+    if_mean=False
     ):
   """Fits a model to convergence, by repeatedly calling train_model.
   
@@ -537,6 +538,7 @@ def fit_model(
       optimizer=optimizer,
       do_plot=False,
       n_steps=0,
+      if_mean=if_mean
   )
 
   # Train until the test loss stops going down
@@ -562,6 +564,7 @@ def fit_model(
         loss_fun=loss_fun,
         do_plot=False,
         n_steps=n_steps_per_call,
+        if_mean=if_mean
     )
     n_calls_to_train_model += 1
     t_start = time.time()
