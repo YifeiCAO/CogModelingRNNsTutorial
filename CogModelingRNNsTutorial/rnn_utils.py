@@ -12,6 +12,7 @@ import numpy as np
 import optax
 import time
 import warnings
+from functools import partial
 
 warnings.filterwarnings("ignore")
 
