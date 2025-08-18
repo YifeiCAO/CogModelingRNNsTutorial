@@ -142,6 +142,7 @@ def train_model(
     loss_fun: str = 'categorical',
     do_plot: bool = True,
     truncate_seq_length: Optional[int] = None,
+    if_mean: bool=False,
     ) -> Tuple[hk.Params, optax.OptState, Dict[str, np.ndarray]]:
   """Trains a model for a fixed number of steps.
 
@@ -195,7 +196,7 @@ def train_model(
     opt_state = optimizer.init(params)
 
   def categorical_log_likelihood(
-      labels: np.ndarray, output_logits: np.ndarray
+      labels: np.ndarray, output_logits: np.ndarray, if_mean=False
   ) -> float:
     # Mask any errors for which label is negative
     mask = jnp.logical_not(labels < 0)
@@ -211,13 +212,15 @@ def train_model(
     log_liks = one_hot_labels * log_probs
     masked_log_liks = jnp.multiply(log_liks, mask)
     loss = -jnp.nansum(masked_log_liks)
+    if if_mean:
+      loss = loss / jnp.maximum(mask.sum(), 1)
     return loss
 
   def categorical_loss(
-      params, xs: np.ndarray, labels: np.ndarray, random_key
+      params, xs: np.ndarray, labels: np.ndarray, random_key, if_mean=False
   ) -> float:
     output_logits = model.apply(params, random_key, xs)
-    loss = categorical_log_likelihood(labels, output_logits)
+    loss = categorical_log_likelihood(labels, output_logits, if_mean=if_mean)
     return loss
 
   def penalized_categorical_loss(
@@ -238,7 +241,10 @@ def train_model(
       'categorical': categorical_loss,
       'penalized_categorical': penalized_categorical_loss,
   }
-  compute_loss = jax.jit(losses[loss_fun])
+  if loss_fun == 'categorical':
+      compute_loss = jax.jit(partial(categorical_loss, if_mean=if_mean))
+  else:
+      compute_loss = jax.jit(losses[loss_fn])
 
   # Define what it means to train a single step
   @jax.jit
