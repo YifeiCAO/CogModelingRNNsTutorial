@@ -201,7 +201,7 @@ class BiControlRNN(hk.RNNCore):
     next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
 
     # Habit module: update/create new habit
-    next_habit, next_h_state = self._habit_rnn(h_state, habit, action_onehot)
+    next_habit, next_h_state = self._habit_rnn(h_state, habit, action_onehot, value, reward)
 
     # Combine value and habit
     logits = self.w_v * next_value + self.w_h * next_habit  # (bs, n_a)
