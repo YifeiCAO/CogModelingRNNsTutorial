@@ -123,9 +123,17 @@ class BiControlRNN(hk.RNNCore):
 
   def _value_rnn(self, state, value, action, reward):
 
-    pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
-    pre_nonact_val = jnp.sum(value * (np.ones([1,2]) - action), axis=1)  # (batch_s, 1)
-    pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)
+    # 假设 value.shape = (B, n_actions), action.shape = (B, n_actions)
+    B, nA = value.shape
+
+    # 选中/未选中的价值，保持 (B,1)
+    pre_act_val = jnp.sum(value * action, axis=1, keepdims=True)                  # (B,1)
+    pre_nonact_val = jnp.sum(value * (jnp.ones((1, nA)) - action),
+                             axis=1, keepdims=True)                                # (B,1)
+
+    # 归一化的“选中”价值 (B,1)
+    pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)        # (B,1)
+
     context_weight = reward[:, jnp.newaxis] - pre_act_val_norm
     memory_weight = 1.0 - context_weight
     
@@ -144,9 +152,16 @@ class BiControlRNN(hk.RNNCore):
 
   def _habit_rnn(self, state, habit, action, value, reward):
 
-    pre_act_val = jnp.sum(value * action, axis=1)  # (batch_s, 1)
-    pre_nonact_val = jnp.sum(value * (np.ones([1,2]) - action), axis=1)  # (batch_s, 1)
-    pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)
+    # 假设 value.shape = (B, n_actions), action.shape = (B, n_actions)
+    B, nA = value.shape
+
+    # 选中/未选中的价值，保持 (B,1)
+    pre_act_val = jnp.sum(value * action, axis=1, keepdims=True)                  # (B,1)
+    pre_nonact_val = jnp.sum(value * (jnp.ones((1, nA)) - action),
+                             axis=1, keepdims=True)                                # (B,1)
+
+    # 归一化的“选中”价值 (B,1)
+    pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)        # (B,1)
     context_weight = reward[:, jnp.newaxis] - pre_act_val_norm
     memory_weight = 1.0 - context_weight
     
