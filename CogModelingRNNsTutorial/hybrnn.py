@@ -142,7 +142,6 @@ class BiControlRNN(hk.RNNCore):
     # 5) 做逐元素缩放，得到与 value/state 形状可广播的权重
     value_mod = value * context_weight        # (B, n_actions)
     state_mod = state * memory_weight         # (B, hidden_size)
-    pre_act_val = jnp.squeeze(pre_act_val, axis=-1)   # -> (B,1)
 
     # 6) 现在拼接 —— 确保所有都是 2D：(B, D)
     inputs = jnp.concatenate(
