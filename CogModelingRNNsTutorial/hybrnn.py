@@ -127,7 +127,7 @@ class BiControlRNN(hk.RNNCore):
     pre_nonact_val = jnp.sum(value * (np.ones([1,2]) - action), axis=1)  # (batch_s, 1)
     pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)
     context_weight = reward[:, jnp.newaxis] - pre_act_val_norm
-    memory_weight = 1.0 - rpe
+    memory_weight = 1.0 - context_weight
     
 
     inputs = jnp.concatenate(
@@ -148,7 +148,8 @@ class BiControlRNN(hk.RNNCore):
     pre_nonact_val = jnp.sum(value * (np.ones([1,2]) - action), axis=1)  # (batch_s, 1)
     pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)
     context_weight = reward[:, jnp.newaxis] - pre_act_val_norm
-    memory_weight = 1.0 - rpe
+    memory_weight = 1.0 - context_weight
+    
     inputs = action
     inputs = jnp.concatenate([inputs, context_weight * habit, memory_weight * state], axis=-1)
 
