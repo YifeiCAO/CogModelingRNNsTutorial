@@ -180,7 +180,7 @@ class BiControlRNN(hk.RNNCore):
     state_mod = state * memory_weight         # (B, hidden_size)
 
     # 6) 现在拼接 —— 确保所有都是 2D：(B, D)
-    inputs = antion
+    inputs = action
     inputs = jnp.concatenate(
         [action, reward[:, jnp.newaxis], habit_mod, state_mod],
         axis=-1
