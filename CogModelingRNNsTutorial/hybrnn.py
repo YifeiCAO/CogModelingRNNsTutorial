@@ -123,24 +123,31 @@ class BiControlRNN(hk.RNNCore):
 
   def _value_rnn(self, state, value, action, reward):
 
-    # 假设 value.shape = (B, n_actions), action.shape = (B, n_actions)
+    # value: (B, n_actions), action: (B, n_actions), reward: (B,)
     B, nA = value.shape
 
-    # 选中/未选中的价值，保持 (B,1)
-    pre_act_val = jnp.sum(value * action, axis=1, keepdims=True)                  # (B,1)
-    pre_nonact_val = jnp.sum(value * (jnp.ones((1, nA)) - action),
-                             axis=1, keepdims=True)                                # (B,1)
+    # 1) 选中/未选中的价值 —— 保持 (B,1)
+    pre_act_val = jnp.sum(value * action, axis=1, keepdims=True)  # (B,1)
+    pre_nonact_val = jnp.sum(value * (jnp.ones((1, nA)) - action), axis=1, keepdims=True)  # (B,1)
 
-    # 归一化的“选中”价值 (B,1)
-    pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)        # (B,1)
+    # 2) 归一化命中概率（数值稳）
+    pre_act_val_norm = pre_act_val / (pre_act_val + pre_nonact_val + 1e-8)  # (B,1)
 
-    context_weight = reward[:, jnp.newaxis] - pre_act_val_norm
-    memory_weight = 1.0 - context_weight
+    # 3) RPE（形状也保持 (B,1)）
+    rpe = reward[:, None] - pre_act_val_norm  # (B,1)
     
+    context_weight = rpe
+    memory_weight = 1.0 - rpe
 
+    # 5) 做逐元素缩放，得到与 value/state 形状可广播的权重
+    value_mod = value * context_weight        # (B, n_actions)
+    state_mod = state * memory_weight         # (B, hidden_size)
+
+    # 6) 现在拼接 —— 确保所有都是 2D：(B, D)
     inputs = jnp.concatenate(
-        [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
-    inputs = jnp.concatenate([inputs, context_weight * value, memory_weight * state], axis=-1)
+        [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis], value_mod, state_mod],
+        axis=-1
+    )
 
     next_state = jax.nn.tanh(hk.Linear(self._hidden_size)(inputs))
 
