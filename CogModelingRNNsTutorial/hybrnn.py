@@ -1,5 +1,5 @@
 """Define hybRNNs."""
-from typing import Optional
+from typing import Optional, Tuple
 
 import haiku as hk
 import jax
