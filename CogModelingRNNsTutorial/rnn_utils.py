@@ -720,7 +720,8 @@ def eval_model(
 
       y_hats.append(y_hat)
 
-    return np.asarray(y_hats), states
+    # np.asarray(list_of_jax_arrays) 不可靠，可能得到错误布局；显式按时间维 stack 成 (T, N, C)。
+    return jnp.stack(y_hats, axis=0), states
 
   model = hk.transform(unroll_network)
   key = jax.random.PRNGKey(np.random.randint(2**32))
