@@ -860,15 +860,19 @@ class Hk_ConUnequalAgentQ(hk.RNNCore):
     return values
 
 class Hk_PreserveConAgentQ(hk.RNNCore):
-  """Vanilla Q-Learning model, expressed in Haiku.
+  """Contrastive Q-learning with perseverance, in Haiku.
 
-  Updates value of chosen action using a delta rule with step-size param alpha. 
-  Does not update value of the unchosen action.
-  Selects actions using a softmax decision rule with parameter Beta.
+  For each arm k: chosen arm uses delta (R - Q_k); unchosen arms use ((1-R) - Q_k).
+  This matches the original 2-arm formulation and generalizes to ``n_actions`` >= 2.
+  Action logits: beta * Q + perseverance * one_hot(previous choice).
   """
 
-  def __init__(self, n_cs=4):
+  def __init__(self, n_actions: int = 2, n_cs=4):
     super(Hk_PreserveConAgentQ, self).__init__()
+
+    if int(n_actions) < 2:
+      raise ValueError('n_actions must be >= 2')
+    self._n_actions = int(n_actions)
 
     # Haiku parameters
     alpha_unsigmoid = hk.get_parameter(
@@ -888,31 +892,29 @@ class Hk_PreserveConAgentQ(hk.RNNCore):
     self._q_init = 0.5
     self.perseverance = perseverance
 
-  def __call__(self, inputs: jnp.array, prev_state: jnp.array):
+  def __call__(self, inputs: jnp.ndarray, prev_state: jnp.ndarray):
     prev_qs = prev_state
 
-    choice = inputs[:, 0]  # shape: (batch_size, 1)
-    reward = inputs[:, 1]  # shape: (batch_size, 1)
+    choice = jnp.asarray(inputs[:, 0], dtype=jnp.int32)
+    reward = jnp.asarray(inputs[:, -1], dtype=jnp.float32)
+    if reward.ndim > 1:
+      reward = reward.reshape(reward.shape[0])
 
-    choice_onehot = jax.nn.one_hot(choice, num_classes=2)  # shape: (batch_size, 2)
-    chosen_value = jnp.sum(prev_qs * choice_onehot, axis=1)  # shape: (batch_size)
-    unchosen_value = jnp.sum(prev_qs * (np.ones([1,2]) - choice_onehot), axis=1)
-    deltas = reward - chosen_value  # shape: (batch_size)
-    deltas_con = (1 - reward) - unchosen_value
-    new_qs = prev_qs + self.alpha * choice_onehot * jnp.expand_dims(deltas, -1) + self.alpha * (np.ones([1,2]) - choice_onehot) * jnp.expand_dims(deltas_con, -1)
-    
-    # Compute perseverance values
-    perseverance_values = self.perseverance * choice_onehot  # shape: (batch_size, 2)
+    choice_onehot = jax.nn.one_hot(choice, num_classes=self._n_actions)
+    # Per-arm TD-style updates (2-arm case equivalent to previous implementation).
+    delta_arm = (
+        choice_onehot * (reward[:, jnp.newaxis] - prev_qs)
+        + (1.0 - choice_onehot) * ((1.0 - reward[:, jnp.newaxis]) - prev_qs)
+    )
+    new_qs = prev_qs + self.alpha * delta_arm
 
-
-    # Compute output logits
+    perseverance_values = self.perseverance * choice_onehot
     choice_logits = self.beta * new_qs + perseverance_values
 
     return choice_logits, new_qs
 
   def initial_state(self, batch_size):
-    values = self._q_init * jnp.ones([batch_size, 2])  # shape: (batch_size, n_actions)
-    return values
+    return self._q_init * jnp.ones([batch_size, self._n_actions])
 
 class Hk_PreserveConUnequalAgentQ(hk.RNNCore):
   """Vanilla Q-Learning model, expressed in Haiku.
