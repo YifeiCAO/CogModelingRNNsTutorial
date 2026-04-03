@@ -10,7 +10,12 @@ RNNState = jnp.array
 
 
 class BiRNN(hk.RNNCore):
-  """A hybrid RNN: "habit" processes action choices; "value" processes rewards."""
+  """Hybrid RNN: habit tracks actions, value tracks rewards (per-arm).
+
+  All arm-dimensional tensors follow ``network_params['n_actions']`` (not fixed
+  at 2): one-hot inputs, habit/value state, habit readout, and logits are
+  ``(batch, n_actions)``. Set ``n_actions`` when building ``network_params``.
+  """
 
   def __init__(self, rl_params, network_params, init_value=0.5):
 
@@ -72,7 +77,7 @@ class BiRNN(hk.RNNCore):
     h_state, v_state, habit, value = prev_state
     action = inputs[:, 0]  # shape: (batch_size, )
     reward = inputs[:, -1]  # shape: (batch_size,)
-    action_onehot = jax.nn.one_hot(action,2)
+    action_onehot = jax.nn.one_hot(action, self._n_actions)
     
     # Value module: update/create new values
     next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
@@ -485,7 +490,7 @@ class BiRNN_oneDim(hk.RNNCore):
     h_state, v_state, habit, value = prev_state
     action = inputs[:, 0]  # shape: (batch_size, )
     reward = inputs[:, -1]  # shape: (batch_size,)
-    action_onehot = jax.nn.one_hot(action,2)
+    action_onehot = jax.nn.one_hot(action, 2)
     
     # Value module: update/create new values
     next_value, next_v_state = self._value_rnn(v_state, value, action, reward)
@@ -566,7 +571,7 @@ class BiRNN_onValue(hk.RNNCore):
     h_state, v_state, habit, value = prev_state
     action = inputs[:, 0]  # shape: (batch_size, )
     reward = inputs[:, -1]  # shape: (batch_size,)
-    action_onehot = jax.nn.one_hot(action,2)
+    action_onehot = jax.nn.one_hot(action, self._n_actions)
     
     # Value module: update/create new values
     next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
@@ -647,7 +652,7 @@ class BiRNN_onHabit(hk.RNNCore):
     h_state, v_state, habit, value = prev_state
     action = inputs[:, 0]  # shape: (batch_size, )
     reward = inputs[:, -1]  # shape: (batch_size,)
-    action_onehot = jax.nn.one_hot(action,2)
+    action_onehot = jax.nn.one_hot(action, self._n_actions)
     
     # Value module: update/create new values
     next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
@@ -732,7 +737,7 @@ class BiRNN_noHabit(hk.RNNCore):
     v_state, value = prev_state
     action = inputs[:, 0]  # shape: (batch_size, )
     reward = inputs[:, -1]  # shape: (batch_size,)
-    action_onehot = jax.nn.one_hot(action,2)
+    action_onehot = jax.nn.one_hot(action, self._n_actions)
     
     # Value module: update/create new values
     next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
@@ -799,24 +804,25 @@ class BiConRNN(hk.RNNCore):
 
     return next_value, next_state
 
-  def _value_con_rnn(self, state, value, action, reward):
+  def _value_con_rnn(self, state, c_value, action, reward):
 
-    pre_act_val = jnp.sum(value * (np.ones(1,2) - action), axis=1)  # (batch_s, 1)
+    one_minus_a = jnp.ones_like(action) - action
+    pre_act_val = jnp.sum(c_value * one_minus_a, axis=1)  # (batch_s, 1)
 
     inputs = jnp.concatenate(
         [pre_act_val[:, jnp.newaxis], reward[:, jnp.newaxis]], axis=-1)
     if self._vo:  # "o" = output -> feed previous output back in
-      inputs = jnp.concatenate([inputs, value], axis=-1)
+      inputs = jnp.concatenate([inputs, c_value], axis=-1)
     if self._vs:  # "s" = state -> feed previous hidden state back in
       inputs = jnp.concatenate([inputs, state], axis=-1)
 
     next_state = jax.nn.tanh(hk.Linear(self._hidden_size)(inputs))
 
     update = hk.Linear(1)(next_state)
-    value = (1 - self.forget) * value + self.forget * self.init_value
-    next_value = value + (np.ones(1,2) - action) * update
+    c_value = (1 - self.forget) * c_value + self.forget * self.init_value
+    next_c_value = c_value + one_minus_a * update
 
-    return next_con_value, next_state
+    return next_c_value, next_state
 
   def _habit_rnn(self, state, habit, action):
 
@@ -835,12 +841,12 @@ class BiConRNN(hk.RNNCore):
     h_state, v_state, c_state, habit, value, c_value = prev_state
     action = inputs[:, 0]  # shape: (batch_size, )
     reward = inputs[:, -1]  # shape: (batch_size,)
-    action_onehot = jax.nn.one_hot(action,2)
+    action_onehot = jax.nn.one_hot(action, self._n_actions)
     
     # Value module: update/create new values
     next_value, next_v_state = self._value_rnn(v_state, value, action_onehot, reward)
     
-    next_c_value, next_c_state = self._value_con_rnn(c_state, value, action_onehot, reward)
+    next_c_value, next_c_state = self._value_con_rnn(c_state, c_value, action_onehot, reward)
 
     # Habit module: update/create new habit
     next_habit, next_h_state = self._habit_rnn(h_state, habit, action_onehot)
