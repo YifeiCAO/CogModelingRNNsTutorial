@@ -144,6 +144,7 @@ def train_model(
     do_plot: bool = True,
     truncate_seq_length: Optional[int] = None,
     if_mean: bool=False,
+    reduce_host_sync: bool = False,
     ) -> Tuple[hk.Params, optax.OptState, Dict[str, np.ndarray]]:
   """Trains a model for a fixed number of steps.
 
@@ -164,6 +165,9 @@ def train_model(
     do_plot: Boolean that controls whether a learning curve is plotted
       (default=True)
     truncate_seq_length: truncate to sequence length (default=None)
+    reduce_host_sync: If True, fuse training steps in chunks with lax.scan so
+      host-device sync happens once per chunk (faster on TPU/GPU). If False,
+      behavior matches the original per-step Python loop.
 
   Returns:
     params: Trained parameters
@@ -245,7 +249,7 @@ def train_model(
   if loss_fun == 'categorical':
       compute_loss = jax.jit(partial(categorical_loss, if_mean=if_mean))
   else:
-      compute_loss = jax.jit(losses[loss_fn])
+      compute_loss = jax.jit(losses[loss_fun])
 
   # Define what it means to train a single step
   @jax.jit
@@ -263,32 +267,120 @@ def train_model(
   training_loss = []
   testing_loss = []
   t_start = time.time()
-  for step in jnp.arange(n_steps):
-    random_key, key_i = jax.random.split(random_key, 2)
-    # Train on training data
-    xs, ys = next(dataset_train)
-    if (truncate_seq_length is not None) and (truncate_seq_length < xs.shape[0]):
-      xs = xs[:truncate_seq_length]
-      ys = ys[:truncate_seq_length]
 
-    loss, params, opt_state = train_step(params, opt_state, xs, ys, key_i)
-    training_loss.append(float(loss))
+  _CHUNK = 16
 
-    # Compute testing loss
-    if dataset_test is not None:
-      xs_test, ys_test = next(dataset_test)
-      if (truncate_seq_length is not None) and (truncate_seq_length < xs_test.shape[0]):
-        xs_test = xs_test[:truncate_seq_length]
-        ys_test = ys_test[:truncate_seq_length]
+  if reduce_host_sync and n_steps > 0:
 
-      test_loss = compute_loss(params, xs_test, ys_test, key_i)
-      testing_loss.append(float(test_loss))
+    @jax.jit
+    def _train_chunk_with_test(carry, stacked):
+      xs_stk, ys_stk, xs_t_stk, ys_t_stk = stacked
 
-      # Log every 10th step
-      if step % 10 == 9:
-        print((f'\rStep {step + 1} of {n_steps}; '
-               f'Loss: {loss:.4e}; Test Loss: {test_loss:.4e}. '
-               f'(Time: {time.time()-t_start:.1f}s)'), end='')
+      def body(c, batch):
+        params, opt_state, rng = c
+        xa, ya, xte, yte = batch
+        rng, key_i = jax.random.split(rng)
+        tr, params, opt_state = train_step(params, opt_state, xa, ya, key_i)
+        te = compute_loss(params, xte, yte, key_i)
+        return (params, opt_state, rng), (tr, te)
+
+      return jax.lax.scan(body, carry, (xs_stk, ys_stk, xs_t_stk, ys_t_stk))
+
+    @jax.jit
+    def _train_chunk_train_only(carry, stacked):
+      xs_stk, ys_stk = stacked
+
+      def body(c, batch):
+        params, opt_state, rng = c
+        xa, ya = batch
+        rng, key_i = jax.random.split(rng)
+        tr, params, opt_state = train_step(params, opt_state, xa, ya, key_i)
+        return (params, opt_state, rng), tr
+
+      return jax.lax.scan(body, carry, (xs_stk, ys_stk))
+
+    for chunk_start in range(0, n_steps, _CHUNK):
+      size = min(_CHUNK, n_steps - chunk_start)
+      xs_list, ys_list = [], []
+      xt_list, yt_list = [], []
+      for _ in range(size):
+        xs, ys = next(dataset_train)
+        if (truncate_seq_length is not None) and (
+            truncate_seq_length < xs.shape[0]):
+          xs = xs[:truncate_seq_length]
+          ys = ys[:truncate_seq_length]
+        xs_list.append(np.asarray(xs))
+        ys_list.append(np.asarray(ys))
+        if dataset_test is not None:
+          xs_test, ys_test = next(dataset_test)
+          if (truncate_seq_length is not None) and (
+              truncate_seq_length < xs_test.shape[0]):
+            xs_test = xs_test[:truncate_seq_length]
+            ys_test = ys_test[:truncate_seq_length]
+          xt_list.append(np.asarray(xs_test))
+          yt_list.append(np.asarray(ys_test))
+
+      init_carry = (params, opt_state, random_key)
+      xs_stk = jnp.stack([jnp.asarray(x) for x in xs_list])
+      ys_stk = jnp.stack([jnp.asarray(y) for y in ys_list])
+
+      if dataset_test is not None:
+        xs_t_stk = jnp.stack([jnp.asarray(x) for x in xt_list])
+        ys_t_stk = jnp.stack([jnp.asarray(y) for y in yt_list])
+        (params, opt_state, random_key), (tr_ar, te_ar) = (
+            _train_chunk_with_test(
+                init_carry, (xs_stk, ys_stk, xs_t_stk, ys_t_stk)))
+        tr_np = np.asarray(tr_ar)
+        te_np = np.asarray(te_ar)
+        for i in range(size):
+          training_loss.append(float(tr_np[i]))
+          testing_loss.append(float(te_np[i]))
+          step = chunk_start + i
+          if step % 10 == 9:
+            print((f'\rStep {step + 1} of {n_steps}; '
+                   f'Loss: {tr_np[i]:.4e}; Test Loss: {te_np[i]:.4e}. '
+                   f'(Time: {time.time()-t_start:.1f}s)'), end='')
+      else:
+        (params, opt_state, random_key), tr_ar = _train_chunk_train_only(
+            init_carry, (xs_stk, ys_stk))
+        tr_np = np.asarray(tr_ar)
+        for i in range(size):
+          training_loss.append(float(tr_np[i]))
+          step = chunk_start + i
+          if step % 10 == 9:
+            print((f'\rStep {step + 1} of {n_steps}; '
+                   f'Loss: {tr_np[i]:.4e}. '
+                   f'(Time: {time.time()-t_start:.1f}s)'), end='')
+
+  else:
+    for step in jnp.arange(n_steps):
+      random_key, key_i = jax.random.split(random_key, 2)
+      # Train on training data
+      xs, ys = next(dataset_train)
+      if (truncate_seq_length is not None) and (
+          truncate_seq_length < xs.shape[0]):
+        xs = xs[:truncate_seq_length]
+        ys = ys[:truncate_seq_length]
+
+      loss, params, opt_state = train_step(params, opt_state, xs, ys, key_i)
+      training_loss.append(float(loss))
+
+      # Compute testing loss
+      if dataset_test is not None:
+        xs_test, ys_test = next(dataset_test)
+        if (truncate_seq_length is not None) and (
+            truncate_seq_length < xs_test.shape[0]):
+          xs_test = xs_test[:truncate_seq_length]
+          ys_test = ys_test[:truncate_seq_length]
+
+        test_loss = compute_loss(params, xs_test, ys_test, key_i)
+        testing_loss.append(float(test_loss))
+
+        # Log every 10th step
+        if step % 10 == 9:
+          print((f'\rStep {step + 1} of {n_steps}; '
+                 f'Loss: {loss:.4e}; Test Loss: {test_loss:.4e}. '
+                 f'(Time: {time.time()-t_start:.1f}s)'), end='')
 
   # If we actually did any training, print final loss and make a nice plot
   if n_steps > 1 and do_plot and dataset_test is not None:
@@ -511,7 +603,8 @@ def fit_model(
     return_all_losses=False,
     early_stop_step: int = 200,  # 用于控制检查的步数
     if_early_stop=False,
-    if_mean=False
+    if_mean=False,
+    reduce_host_sync: bool = False,
     ):
   """Fits a model to convergence, by repeatedly calling train_model.
   
@@ -539,7 +632,8 @@ def fit_model(
       optimizer=optimizer,
       do_plot=False,
       n_steps=0,
-      if_mean=if_mean
+      if_mean=if_mean,
+      reduce_host_sync=reduce_host_sync,
   )
 
   # Train until the test loss stops going down
@@ -565,7 +659,8 @@ def fit_model(
         loss_fun=loss_fun,
         do_plot=False,
         n_steps=n_steps_per_call,
-        if_mean=if_mean
+        if_mean=if_mean,
+        reduce_host_sync=reduce_host_sync,
     )
     n_calls_to_train_model += 1
     t_start = time.time()
