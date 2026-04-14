@@ -867,12 +867,13 @@ class Hk_PreserveConAgentQ(hk.RNNCore):
   Action logits: beta * Q + perseverance * one_hot(previous choice).
   """
 
-  def __init__(self, n_actions: int = 2, n_cs=4):
+  def __init__(self, n_actions: int = 2, n_cs=4, reward_col: int = -1):
     super(Hk_PreserveConAgentQ, self).__init__()
 
     if int(n_actions) < 2:
       raise ValueError('n_actions must be >= 2')
     self._n_actions = int(n_actions)
+    self._reward_col = reward_col
 
     # Haiku parameters
     alpha_unsigmoid = hk.get_parameter(
@@ -896,7 +897,7 @@ class Hk_PreserveConAgentQ(hk.RNNCore):
     prev_qs = prev_state
 
     choice = jnp.asarray(inputs[:, 0], dtype=jnp.int32)
-    reward = jnp.asarray(inputs[:, -1], dtype=jnp.float32)
+    reward = jnp.asarray(inputs[:, self._reward_col], dtype=jnp.float32)
     if reward.ndim > 1:
       reward = reward.reshape(reward.shape[0])
 
