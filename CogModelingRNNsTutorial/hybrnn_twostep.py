@@ -966,3 +966,145 @@ class BiConRNN(hk.RNNCore):
         self.init_value * jnp.ones([batch_size, self._n_actions]),  # value
         self.init_value * jnp.ones([batch_size, self._n_actions]),  # c_value
         )
+
+
+class BiChannelRNN(hk.RNNCore):
+  """Two-channel hybrid RNN for the TWO-STEP task (configurable gate).
+
+  Two-step counterpart of hybrnn.BiChannelRNN: inputs are parsed as
+  [action, reward, transition] and `transition` is fed to both channels and to
+  the gate alongside reward / action / value.
+
+  VALUE module -- two channels, each proposing an update to the action values:
+    * context channel: feedforward, encodes ONLY the current trial ("fast / evidence")
+    * memory  channel: recurrent, carries its OWN hidden state     ("slow / history")
+  Combination modes:
+    gate_mode='additive'  : final_update = update_ctx + update_mem          (no gate)
+    gate_mode='learnable' : gate = sigmoid(MLP([reward, transition, action, value, memory_state]))
+    gate_mode='surprise'  : gate = sigmoid(MLP([reward, transition, pre_act_val, RPE]))
+  For 'learnable'/'surprise': final_update = gate*update_ctx + (1-gate)*update_mem.
+
+  HABIT module -- a single recurrent (memory) channel over [action, transition]
+  only: no gate, no context channel, reward-independent.
+
+  State tuple: (h_state, memory_state, habit, value)
+  """
+
+  def __init__(self, rl_params, network_params, init_value=0.5, gate_mode='learnable'):
+    super().__init__()
+    if gate_mode not in ('additive', 'learnable', 'surprise'):
+      raise ValueError(
+          f"gate_mode must be 'additive'/'learnable'/'surprise', got {gate_mode!r}")
+    self._gate_mode = gate_mode
+    self._hidden_size = network_params['hidden_size']
+    self._n_actions = network_params['n_actions']
+    self.w_h = rl_params['w_h']
+    self.w_v = rl_params['w_v']
+    self.init_value = init_value
+
+    if rl_params.get('fit_forget', False):
+      init = hk.initializers.RandomNormal(stddev=1, mean=0)
+      self.forget = jax.nn.sigmoid(
+          hk.get_parameter('unsigmoid_forget', (1,), init=init))
+    else:
+      self.forget = rl_params.get('forget', 0.1)
+
+  def _combine_gate(self, memory_state, value, action_onehot, reward, transition):
+    """Return the gate signal (B, 1) in [0, 1]; None for additive mode."""
+    if self._gate_mode == 'additive':
+      return None
+    with hk.name_scope('gate'):
+      if self._gate_mode == 'learnable':
+        # raw inputs -- the gate must learn any structure (incl. surprise) itself
+        gate_inputs = jnp.concatenate(
+            [reward[:, None], transition[:, None], action_onehot, value,
+             memory_state], axis=-1)
+      else:  # 'surprise' -- fed the reward-prediction-error explicitly
+        pre_act_val = jnp.sum(value * action_onehot, axis=-1, keepdims=True)
+        rpe = reward[:, None] - pre_act_val
+        gate_inputs = jnp.concatenate(
+            [reward[:, None], transition[:, None], pre_act_val, rpe], axis=-1)
+      hidden = jax.nn.relu(hk.Linear(16, name='gate_hidden')(gate_inputs))
+      logit = hk.Linear(1, name='gate_out',
+                        w_init=hk.initializers.RandomNormal(stddev=0.01),
+                        b_init=hk.initializers.Constant(0.0))(hidden)
+      return jax.nn.sigmoid(logit)
+
+  def _value_rnn(self, memory_state, value, action_onehot, reward, transition):
+    with hk.name_scope('value_module'):
+      evidence = jnp.concatenate(
+          [reward[:, None], transition[:, None], action_onehot, value], axis=-1)
+
+      # Context channel: feedforward -- sees ONLY the current trial
+      context_state = jax.nn.tanh(
+          hk.Linear(self._hidden_size, name='ctx_stream')(evidence))
+
+      # Memory channel: recurrent -- sees current trial + its OWN previous state
+      mem_in = jnp.concatenate([evidence, memory_state], axis=-1)
+      next_memory_state = jax.nn.tanh(
+          hk.Linear(self._hidden_size, name='mem_stream')(mem_in))
+
+      update_ctx = hk.Linear(1, name='update_ctx_proj')(context_state)
+      update_mem = hk.Linear(1, name='update_mem_proj')(next_memory_state)
+
+      gate = self._combine_gate(memory_state, value, action_onehot, reward, transition)
+      if gate is None:  # additive
+        final_update = update_ctx + update_mem
+      else:
+        final_update = gate * update_ctx + (1.0 - gate) * update_mem
+
+      decayed_value = (1 - self.forget) * value + self.forget * self.init_value
+      next_value = decayed_value + action_onehot * final_update
+
+    return next_value, next_memory_state, gate
+
+  def _habit_rnn(self, h_state, action_onehot, transition):
+    """Habit = one recurrent memory channel over [action, transition] only."""
+    with hk.name_scope('habit_module'):
+      mem_in = jnp.concatenate(
+          [action_onehot, transition[:, None], h_state], axis=-1)
+      next_h_state = jax.nn.tanh(
+          hk.Linear(self._hidden_size, name='habit_mem_stream')(mem_in))
+      next_habit = hk.Linear(self._n_actions, name='habit_out')(next_h_state)
+    return next_habit, next_h_state
+
+  def __call__(self, inputs: jnp.ndarray, prev_state: Tuple):
+    h_state, memory_state, habit, value = prev_state
+    _, action_onehot, reward, transition = _parse_twostep_inputs(
+        inputs, self._n_actions)
+
+    next_value, next_memory_state, _gate = self._value_rnn(
+        memory_state, value, action_onehot, reward, transition)
+    next_habit, next_h_state = self._habit_rnn(h_state, action_onehot, transition)
+
+    logits = self.w_v * next_value + self.w_h * next_habit
+    return logits, (next_h_state, next_memory_state, next_habit, next_value)
+
+  def call_with_gate(self, inputs: jnp.ndarray, prev_state: Tuple):
+    """Like __call__ but also returns (gate, rpe) for analysis.
+
+    Output: ((logits, gate, rpe), next_state).  gate is the value-module gate
+    (B, 1), NaN-filled in additive mode; rpe is reward - value[chosen] (B, 1).
+    """
+    h_state, memory_state, habit, value = prev_state
+    _, action_onehot, reward, transition = _parse_twostep_inputs(
+        inputs, self._n_actions)
+    pre_act_val = jnp.sum(value * action_onehot, axis=-1, keepdims=True)
+    rpe = reward[:, None] - pre_act_val
+
+    next_value, next_memory_state, gate = self._value_rnn(
+        memory_state, value, action_onehot, reward, transition)
+    next_habit, next_h_state = self._habit_rnn(h_state, action_onehot, transition)
+
+    logits = self.w_v * next_value + self.w_h * next_habit
+    if gate is None:
+      gate = jnp.full_like(rpe, jnp.nan)
+    return (logits, gate, rpe), (next_h_state, next_memory_state, next_habit, next_value)
+
+  def initial_state(self, batch_size: Optional[int]):
+    return (
+        jnp.zeros([batch_size, self._hidden_size]),  # h_state
+        jnp.zeros([batch_size, self._hidden_size]),  # memory_state
+        jnp.zeros([batch_size, self._n_actions]),    # habit
+        self.init_value * jnp.ones([batch_size, self._n_actions]),  # value
+    )
