@@ -669,7 +669,7 @@ def make_cognitive_rl_builder(model_class="Hk_PreserveConAgentQ", n_actions=2):
 # ──────────────────────────────────────────────
 
 RNN_GRID = {
-    "hidden_size": [16, 32, 64],
+    "hidden_size": [16, 32, 64, 128],  # 128 added: vanilla_rnn also kept selecting the 64 ceiling
     "lr": [1e-3, 1e-4],
     "weight_decay": [1e-4, 1e-3],
     "batch_size": [64],
