@@ -676,7 +676,7 @@ RNN_GRID = {
 }
 
 HYBRID_GRID = {
-    "hidden_size": [16, 32, 64],
+    "hidden_size": [16, 32, 64, 128],  # 128 added: earlier suthana hybrid runs kept selecting the 64 ceiling
     "lr": [1e-3, 1e-4],
     "weight_decay": [1e-4, 1e-3],
     "batch_size": [64],
