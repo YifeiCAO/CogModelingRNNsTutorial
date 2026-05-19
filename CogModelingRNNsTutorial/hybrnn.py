@@ -868,12 +868,14 @@ class BiChannelRNN(hk.RNNCore):
   VALUE module -- two channels, each proposing an update to the action values:
     * context channel: feedforward, encodes ONLY the current trial ("fast / evidence")
     * memory  channel: recurrent, carries its OWN hidden state     ("slow / history")
-  The two proposed updates are combined by one of three modes:
+  The two proposed updates are combined by one of four modes:
     gate_mode='additive'  : final_update = update_ctx + update_mem          (no gate)
     gate_mode='learnable' : gate = sigmoid(MLP([reward, action, value, memory_state]))
                             final_update = gate*update_ctx + (1-gate)*update_mem
     gate_mode='surprise'  : gate = sigmoid(MLP([reward, pre_act_val, RPE]))
                             final_update = gate*update_ctx + (1-gate)*update_mem
+    gate_mode='hard'      : like 'learnable' but the gate is binarised to {0,1}
+                            with a straight-through estimator (a hard channel switch)
   'learnable' must discover any surprise structure on its own (raw inputs);
   'surprise' is fed the reward-prediction-error (RPE) explicitly. Training the
   'learnable' variant and then checking whether its gate tracks RPE is the
@@ -892,9 +894,9 @@ class BiChannelRNN(hk.RNNCore):
 
   def __init__(self, rl_params, network_params, init_value=0.5, gate_mode='learnable'):
     super().__init__()
-    if gate_mode not in ('additive', 'learnable', 'surprise'):
+    if gate_mode not in ('additive', 'learnable', 'surprise', 'hard'):
       raise ValueError(
-          f"gate_mode must be 'additive'/'learnable'/'surprise', got {gate_mode!r}")
+          f"gate_mode must be additive/learnable/surprise/hard, got {gate_mode!r}")
     self._gate_mode = gate_mode
     self._hidden_size = network_params['hidden_size']
     self._n_actions = network_params['n_actions']
@@ -910,11 +912,16 @@ class BiChannelRNN(hk.RNNCore):
       self.forget = rl_params.get('forget', 0.1)
 
   def _combine_gate(self, memory_state, value, action_onehot, reward):
-    """Return the gate signal (B, 1) in [0, 1]; None for additive mode."""
+    """Return the gate signal (B, 1); None for additive mode.
+
+    'learnable'/'hard' take raw inputs; 'surprise' takes the explicit RPE.
+    'hard' binarises the gate to {0, 1} via a straight-through estimator
+    (forward = threshold, backward = sigmoid gradient).
+    """
     if self._gate_mode == 'additive':
       return None
     with hk.name_scope('gate'):
-      if self._gate_mode == 'learnable':
+      if self._gate_mode in ('learnable', 'hard'):
         # raw inputs -- the gate must learn any structure (incl. surprise) itself
         gate_inputs = jnp.concatenate(
             [reward[:, None], action_onehot, value, memory_state], axis=-1)
@@ -927,7 +934,12 @@ class BiChannelRNN(hk.RNNCore):
       logit = hk.Linear(1, name='gate_out',
                         w_init=hk.initializers.RandomNormal(stddev=0.01),
                         b_init=hk.initializers.Constant(0.0))(hidden)
-      return jax.nn.sigmoid(logit)
+      soft = jax.nn.sigmoid(logit)
+      if self._gate_mode == 'hard':
+        # straight-through: forward is the {0,1} threshold, gradient is the sigmoid's
+        hard = (soft >= 0.5).astype(soft.dtype)
+        return hard + (soft - jax.lax.stop_gradient(soft))
+      return soft
 
   def _value_rnn(self, memory_state, value, action_onehot, reward):
     with hk.name_scope('value_module'):
